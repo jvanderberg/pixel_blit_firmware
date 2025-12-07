@@ -1,0 +1,17 @@
+.program string_test
+
+% c-sdk {
+#include "hardware/pio.h"
+static inline void string_test_program_init(PIO pio, uint sm, uint offset, uint first_pin) {
+    pio_sm_config c = string_test_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, first_pin, 32);
+    sm_config_set_set_pins(&c, first_pin, 32);
+    sm_config_set_out_shift(&c, false, true, 32);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_NONE);
+    pio_sm_init(pio, sm, offset, &c);
+}
+%}
+
+.wrap_target
+    out pins, 32
+.wrap

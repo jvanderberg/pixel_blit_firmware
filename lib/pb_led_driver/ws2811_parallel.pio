@@ -1,0 +1,63 @@
+;
+; ws2811_parallel.pio - Parallel WS2811/WS2812 output for up to 32 strings
+;
+; Simplified from cblinken - no board addressing, direct 32-bit parallel output.
+; Each 32-bit word from FIFO represents one bit-plane: bit N goes to GPIO N.
+;
+; WS2811 Timing (800kHz, ~1.25µs per bit):
+;   T1: HIGH period before data  (~375ns, 3 cycles)
+;   T2: DATA period              (~375ns, 3 cycles)
+;   T3: LOW period after data    (~500ns, 4 cycles)
+;
+; For a '0' bit: HIGH for T1, then LOW for T2+T3
+; For a '1' bit: HIGH for T1+T2, then LOW for T3
+;
+
+.program ws2811_parallel
+
+.define public T1 3
+.define public T2 3
+.define public T3 4
+
+.wrap_target
+    mov pins, !null     [T1-1]  ; All pins HIGH (start of bit) - 3 cycles
+    out pins, 32        [T2-1]  ; Output data bits (autopull refills OSR) - 3 cycles
+    mov pins, null      [T3-1]  ; All pins LOW (end of bit) - 4 cycles
+.wrap                           ; Total: 10 cycles per bit
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+static inline void ws2811_parallel_program_init(PIO pio, uint sm, uint offset,
+                                                 uint pin_base, uint pin_count, float freq) {
+    // Initialize all output pins
+    for (uint i = pin_base; i < pin_base + pin_count; i++) {
+        pio_gpio_init(pio, i);
+    }
+
+    // Set pin directions to output
+    pio_sm_set_consecutive_pindirs(pio, sm, pin_base, pin_count, true);
+
+    // Get default config
+    pio_sm_config c = ws2811_parallel_program_get_default_config(offset);
+
+    // Configure OUT pins for parallel data (32 pins starting at pin_base)
+    sm_config_set_out_pins(&c, pin_base, pin_count);
+
+    // Shift right, autopull at 32 bits
+    sm_config_set_out_shift(&c, true, true, 32);
+
+    // Join FIFOs for TX only (8 words deep)
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    // Clock divider: freq * cycles_per_bit = actual_clock
+    int cycles_per_bit = ws2811_parallel_T1 + ws2811_parallel_T2 + ws2811_parallel_T3;
+    float div = clock_get_hz(clk_sys) / (freq * cycles_per_bit);
+    sm_config_set_clkdiv(&c, div);
+
+    // Initialize state machine
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}

@@ -1,0 +1,34 @@
+.program board_filter
+
+init:
+    pull block           ; Load expected board ID
+    mov y, osr           ; Save expected ID in Y
+
+discard:
+.wrap_target
+    pull block           ; OSR ← next word
+    
+    in osr, 32         ; get the record type
+    in null, 30        ; get the record type
+    mov x, isr 
+    jmp x-- discard     ; wait until 00 record type - board id
+    
+    restart:
+    ; 00 record type, get board id in next 8 bits
+    in osr, 30         ; get last 30 bits, ignore record type, 
+                       ; we are ok doing this because the isr currently has 00 as the top two bits
+    mov x, isr
+    jmp x != y discard ; ignore board ids that aren't ours - the board ID was shifted up to the top for comparison
+
+    strings:           ; main string reader
+    pull block         ; get the next block
+    in osr, 32         ; get the record type
+    in null, 30        ; get the record type
+    mov x, isr         ;
+    jmp !x restart     ; bail when we hit record type 00 again.
+    mov isr, osr       ; restore the full ISR
+    push block          ; Push to RX FIFO
+    jmp strings
+ 
+.wrap
+

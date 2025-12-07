@@ -1,0 +1,15 @@
+.program parallel_in
+
+.side_set 1 opt
+
+.wrap_target
+    wait 0 gpio 3        ; Wait for clock low
+    wait 1 gpio 3        ; Wait for clock high
+    nop [3]              ; We are oversampling 4x, wait for middle of signal
+    set x, 9
+    read:
+    in pins, 3 [2]       ; Read 3 bits from pins
+    jmp x-- read
+    in pins, 2 [3]       ; Read 2 bits from pins
+
+.wrap 

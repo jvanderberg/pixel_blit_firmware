@@ -1,0 +1,18 @@
+.program parallel_out
+.side_set 1 
+
+.wrap_target
+    nop side 0
+    nop side 1
+    out pins, 3 side 1
+    out pins, 3 side 1
+    out pins, 3 side 1
+    out pins, 3 side 1
+    out pins, 3 side 1
+    out pins, 3 side 1
+    out pins, 3 side 1
+    out pins, 3 side 1
+    out pins, 3 side 1
+    out pins, 3 side 1
+    out pins, 2 side 1
+.wrap 
