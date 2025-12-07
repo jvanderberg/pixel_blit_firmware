@@ -9,6 +9,11 @@
 #include "hardware/adc.h"
 #include "hardware/gpio.h"
 
+// SD Card / FatFS
+#include "ff.h"
+#include "sd_card.h"
+#include "hw_config.h"
+
 #include "app_state.h"
 #include "action.h"
 #include "reducer.h"
@@ -203,6 +208,7 @@ int main() {
     absolute_time_t last_tick_1s = get_absolute_time();
     absolute_time_t last_display_refresh = get_absolute_time();
     absolute_time_t last_board_addr_sample = get_absolute_time();
+    absolute_time_t last_sd_check = get_absolute_time();
 
     printf("Entering main loop\n");
 
@@ -218,6 +224,38 @@ int main() {
         if (next_pressed) {
             next_pressed = false;
             dispatch(action_button_next(now_us));
+        }
+
+        // SD Card Scan (only when in SD Menu)
+        if (current_state.in_detail_view && 
+            current_state.menu_selection == MENU_SD_CARD &&
+            absolute_time_diff_us(last_sd_check, now) >= 1000000) {
+            
+            last_sd_check = now;
+            
+            sd_card_t *sd = sd_get_by_num(0);
+            FRESULT fr = f_mount(&sd->fatfs, sd->pcName, 1);
+            
+            if (fr != FR_OK) {
+                dispatch(action_sd_card_status(now_us, false, "Mount Failed"));
+            } else {
+                DIR dir;
+                FILINFO fno;
+                fr = f_opendir(&dir, "/");
+                if (fr == FR_OK) {
+                    // Read first file
+                    fr = f_readdir(&dir, &fno);
+                    if (fr == FR_OK && fno.fname[0]) {
+                        dispatch(action_sd_card_status(now_us, true, fno.fname));
+                    } else {
+                        dispatch(action_sd_card_status(now_us, true, "Empty Dir"));
+                    }
+                    f_closedir(&dir);
+                } else {
+                    dispatch(action_sd_card_status(now_us, true, "OpenDir Failed"));
+                }
+                // f_unmount(sd->pcName); // Optional, keep mounted for now
+            }
         }
 
         // 1 second tick

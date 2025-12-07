@@ -15,6 +15,7 @@ typedef enum {
 
     // Sensor events
     ACTION_BOARD_ADDRESS_UPDATED,
+    ACTION_SD_CARD_STATUS,
 
     // Animation events
     ACTION_RAINBOW_FRAME_COMPLETE,
@@ -29,6 +30,12 @@ typedef union {
         uint16_t error;
         uint16_t margin;
     } board_address;
+
+    // For ACTION_SD_CARD_STATUS
+    struct {
+        bool mounted;
+        char message[64];
+    } sd_card;
 
     // For ACTION_RAINBOW_FRAME_COMPLETE
     struct {
@@ -84,6 +91,21 @@ static inline Action action_board_address_updated(uint32_t timestamp,
             .margin = margin,
         },
     };
+}
+
+static inline Action action_sd_card_status(uint32_t timestamp, bool mounted, const char* msg) {
+    Action a = {
+        .type = ACTION_SD_CARD_STATUS,
+        .timestamp = timestamp,
+        .payload.sd_card.mounted = mounted,
+    };
+    // Safe copy
+    for(int i=0; i<63; i++) {
+        a.payload.sd_card.message[i] = msg[i];
+        if(msg[i] == 0) break;
+    }
+    a.payload.sd_card.message[63] = 0;
+    return a;
 }
 
 static inline Action action_rainbow_frame_complete(uint32_t timestamp, uint16_t fps) {

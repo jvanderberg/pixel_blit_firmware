@@ -26,7 +26,8 @@ void test_streaming_parsing() {
     printf("Test: Streaming Parsing (Straddled Boundaries)... ");
     
     // Setup Layout: 2 Strings, 2 Pixels each = 4 Pixels total = 12 Channels
-    fseq_layout_t layout = { .num_strings = 2, .pixels_per_string = 2 };
+    uint16_t lengths[] = { 2, 2 };
+    fseq_layout_t layout = { .num_strings = 2, .string_lengths = lengths };
     mock_cb_data_t cb_data = {0};
     
     fseq_parser_ctx_t* ctx = fseq_parser_init(&cb_data, mock_pixel_cb, layout);
@@ -73,8 +74,55 @@ void test_streaming_parsing() {
     printf("PASS\n");
 }
 
+void test_variable_length_strings() {
+    printf("Test: Variable Length Strings... ");
+    
+    // Setup Layout: 
+    // String 0: 2 pixels (Channels 0-5)
+    // String 1: 1 pixel  (Channels 6-8)
+    // Total: 3 pixels, 9 channels
+    uint16_t lengths[] = { 2, 1 };
+    fseq_layout_t layout = {
+        .num_strings = 2,
+        .string_lengths = lengths
+    };
+    
+    mock_cb_data_t cb_data = {0};
+    fseq_parser_ctx_t* ctx = fseq_parser_init(&cb_data, mock_pixel_cb, layout);
+    
+    // Header
+    fseq_header_t h = {0};
+    h.magic = 0x51455350;
+    h.major_version = 2;
+    h.channel_count = 9;
+    fseq_parser_read_header(ctx, (uint8_t*)&h, &h);
+    
+    // Data: 9 bytes
+    // S0P0 (0xAAAAAA), S0P1 (0xBBBBBB), S1P0 (0xCCCCCC)
+    uint8_t data[] = {
+        0xAA, 0xAA, 0xAA,
+        0xBB, 0xBB, 0xBB,
+        0xCC, 0xCC, 0xCC
+    };
+    
+    fseq_parser_push(ctx, data, 9);
+    
+    assert(cb_data.count == 3);
+    
+    // We can't verify exact sequence with just "last_color" in the mock,
+    // but we can trust the logic if we added logging or a stricter mock.
+    // For now, verify the last pixel was S1, P0
+    assert(cb_data.last_string == 1);
+    assert(cb_data.last_pixel == 0);
+    assert(cb_data.last_color == 0xCCCCCC);
+    
+    fseq_parser_deinit(ctx);
+    printf("PASS\n");
+}
+
 int main() {
     test_streaming_parsing();
+    test_variable_length_strings();
     printf("All streaming tests passed!\n");
     return 0;
 }

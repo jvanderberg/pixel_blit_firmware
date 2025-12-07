@@ -1,14 +1,15 @@
 #include "views.h"
 #include <stdio.h>
+#include <string.h>
 
 static void render_main_menu(sh1106_t* display, const AppState* state) {
     sh1106_clear(display);
     sh1106_draw_string(display, 0, 0, "Pixel Blit v1.1", false);
     sh1106_draw_string(display, 0, 10, "Info", state->menu_selection == MENU_INFO);
     sh1106_draw_string(display, 0, 20, "Board Address", state->menu_selection == MENU_BOARD_ADDRESS);
-    sh1106_draw_string(display, 0, 30, "String Test", state->menu_selection == MENU_STRING_TEST);
-    sh1106_draw_string(display, 0, 40, "Toggle Test", state->menu_selection == MENU_TOGGLE_TEST);
-    sh1106_draw_string(display, 0, 50, "Rainbow Test", state->menu_selection == MENU_RAINBOW_TEST);
+    sh1106_draw_string(display, 0, 30, "SD Card", state->menu_selection == MENU_SD_CARD);
+    sh1106_draw_string(display, 0, 40, "String Test", state->menu_selection == MENU_STRING_TEST);
+    sh1106_draw_string(display, 0, 50, "Toggle Test", state->menu_selection == MENU_TOGGLE_TEST);
     sh1106_render(display);
 }
 
@@ -36,6 +37,32 @@ static void render_board_address_detail(sh1106_t* display, const AppState* state
     snprintf(line, sizeof(line), "Err:%u M:%u", state->board_address.error, state->board_address.margin);
     sh1106_draw_string(display, 0, 32, line, false);
     sh1106_draw_string(display, 0, 48, "Next exits", false);
+    sh1106_render(display);
+}
+
+static void render_sd_card_detail(sh1106_t* display, const AppState* state) {
+    sh1106_clear(display);
+    sh1106_draw_string(display, 0, 0, "SD Card", false);
+    sh1106_draw_string(display, 0, 16, state->sd_card.mounted ? "MOUNTED" : "NO CARD", false);
+    
+    // Wrap message if long (basic render)
+    char msg[64];
+    strncpy(msg, state->sd_card.message, sizeof(msg));
+    msg[sizeof(msg)-1] = 0;
+    
+    // Show first 16 chars on one line, next on another
+    char line1[17] = {0};
+    char line2[17] = {0};
+    
+    strncpy(line1, msg, 16);
+    if (strlen(msg) > 16) {
+        strncpy(line2, msg + 16, 16);
+    }
+    
+    sh1106_draw_string(display, 0, 32, line1, false);
+    sh1106_draw_string(display, 0, 40, line2, false);
+    
+    sh1106_draw_string(display, 0, 56, "Next exits", false);
     sh1106_render(display);
 }
 
@@ -85,6 +112,9 @@ void views_render(sh1106_t* display, const AppState* state) {
             break;
         case MENU_BOARD_ADDRESS:
             render_board_address_detail(display, state);
+            break;
+        case MENU_SD_CARD:
+            render_sd_card_detail(display, state);
             break;
         case MENU_STRING_TEST:
             render_string_test_detail(display, state);

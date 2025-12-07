@@ -7,6 +7,7 @@
 typedef enum {
     MENU_INFO = 0,
     MENU_BOARD_ADDRESS,
+    MENU_SD_CARD,
     MENU_STRING_TEST,
     MENU_TOGGLE_TEST,
     MENU_RAINBOW_TEST,
@@ -18,6 +19,12 @@ typedef enum {
     TEST_STOPPED = 0,
     TEST_RUNNING,
 } TestRunState;
+
+// SD Card State
+typedef struct {
+    bool mounted;
+    char message[64]; // Status or filename
+} SdCardState;
 
 // Board address decode result
 typedef struct {
@@ -54,6 +61,9 @@ typedef struct {
 
     // Board info
     BoardAddressInfo board_address;
+    
+    // SD Card
+    SdCardState sd_card;
 
     // Test states
     StringTestState string_test;
@@ -71,6 +81,7 @@ static inline AppState app_state_init(void) {
         .menu_selection = MENU_INFO,
         .in_detail_view = false,
         .board_address = {0},
+        .sd_card = { .mounted = false, .message = "Init..." },
         .string_test = {.run_state = TEST_STOPPED},
         .toggle_test = {.run_state = TEST_STOPPED},
         .rainbow_test = {

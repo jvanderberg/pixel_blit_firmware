@@ -49,14 +49,10 @@ typedef struct fseq_parser_ctx fseq_parser_ctx_t;
  */
 typedef void (*fseq_pixel_cb)(void* user_data, uint8_t string, uint16_t pixel, uint32_t color);
 
-/**
- * @brief Configuration for the parser's linear-to-physical mapping.
- * The parser assumes channels are laid out sequentially: 
- * [String 0, Pixels 0..N], [String 1, Pixels 0..N], ...
- */
+// Configuration for the parser layout
 typedef struct {
-    uint16_t pixels_per_string;
-    uint8_t  num_strings;
+    uint8_t   num_strings;
+    uint16_t* string_lengths; // Array of length [num_strings] containing pixel count for each string
 } fseq_layout_t;
 
 /**

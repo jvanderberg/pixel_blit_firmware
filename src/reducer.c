@@ -64,6 +64,7 @@ static AppState handle_select_detail(const AppState* state) {
 
         case MENU_INFO:
         case MENU_BOARD_ADDRESS:
+        case MENU_SD_CARD:
         default: {
             // Exit detail view
             AppState new_state = app_state_new_version(state);
@@ -123,6 +124,17 @@ static AppState handle_board_address_updated(const AppState* state, const Action
     return new_state;
 }
 
+// Handle SD Card Status
+static AppState handle_sd_status(const AppState* state, const Action* action) {
+    AppState new_state = app_state_new_version(state);
+    new_state.sd_card.mounted = action->payload.sd_card.mounted;
+    // Copy string safely
+    for(int i=0; i<64; i++) {
+        new_state.sd_card.message[i] = action->payload.sd_card.message[i];
+    }
+    return new_state;
+}
+
 // Handle rainbow frame complete (FPS update)
 static AppState handle_rainbow_frame_complete(const AppState* state, const Action* action) {
     if (state->rainbow_test.fps == action->payload.rainbow.fps) {
@@ -148,6 +160,9 @@ AppState reduce(const AppState* state, const Action* action) {
 
         case ACTION_BOARD_ADDRESS_UPDATED:
             return handle_board_address_updated(state, action);
+
+        case ACTION_SD_CARD_STATUS:
+            return handle_sd_status(state, action);
 
         case ACTION_RAINBOW_FRAME_COMPLETE:
             return handle_rainbow_frame_complete(state, action);

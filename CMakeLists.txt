@@ -35,10 +35,32 @@ project(pixel_blit_firmware C CXX ASM)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
+# =============================================================================
+# Fetch Dependencies
+# =============================================================================
+
+include(FetchContent)
+
+# SD Card / FatFS Driver
+FetchContent_Declare(
+  no-OS-FatFS-SD-SPI-RPi-Pico
+  GIT_REPOSITORY https://github.com/carlk3/no-OS-FatFS-SD-SPI-RPi-Pico.git
+)
+FetchContent_MakeAvailable(no-OS-FatFS-SD-SPI-RPi-Pico)
+
+# =============================================================================
+# Libraries
+# =============================================================================
+
 # Add pb_led_driver library
 add_subdirectory(lib/pb_led_driver)
 
-# Add executable. Default name is the project name, version 0.1
+# Add fseq_parser library
+add_subdirectory(lib/fseq_parser)
+
+# =============================================================================
+# Main Executable
+# =============================================================================
 
 add_executable(pixel_blit_firmware
         src/main.c
@@ -48,7 +70,21 @@ add_executable(pixel_blit_firmware
         sh1106.c
         string_test.c
         toggle_test.c
-        rainbow_test.c)
+        rainbow_test.c
+        lib/sd_card/hw_config.c
+        
+        # FatFS / SD Card Driver Sources
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/sd_driver/sd_card.c
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/sd_driver/sd_spi.c
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/sd_driver/spi.c
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/sd_driver/crc.c
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/ff15/source/ff.c
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/ff15/source/ffsystem.c
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/ff15/source/ffunicode.c
+        # Glue code
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/src/glue.c
+        lib/sd_card/my_rtc.c
+)
 
 pico_generate_pio_header(pixel_blit_firmware ${CMAKE_CURRENT_LIST_DIR}/string_test.pio)
 
@@ -63,14 +99,23 @@ target_link_libraries(pixel_blit_firmware
         pico_multicore
         hardware_i2c
         hardware_adc
+        hardware_spi
         hardware_pio
         hardware_clocks
-        pb_led_driver)
+        pb_led_driver
+        fseq_parser
+)
 
 target_include_directories(pixel_blit_firmware PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/src
-        ${CMAKE_CURRENT_LIST_DIR}/lib/pb_led_driver)
+        ${CMAKE_CURRENT_LIST_DIR}/lib/pb_led_driver
+        ${CMAKE_CURRENT_LIST_DIR}/lib/fseq_parser/include
+        ${CMAKE_CURRENT_LIST_DIR}/lib/sd_card
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/sd_driver
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/include
+        ${no-os-fatfs-sd-spi-rpi-pico_SOURCE_DIR}/FatFs_SPI/ff15/source
+)
 
 add_compile_definitions( PICO_RP2350A=0)
 target_compile_definitions(pixel_blit_firmware PRIVATE

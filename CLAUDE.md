@@ -18,7 +18,21 @@ cmake -G Ninja ..
 ninja
 ```
 
-## Architecture
+## Build System & Dependencies
+
+### External Libraries
+The project uses `FetchContent` to pull in the `no-OS-FatFS-SD-SPI-RPi-Pico` library.
+
+**Integration Strategy (Important):**
+The library is integrated by adding its **source files directly** to the executable target, rather than linking against a library target. This avoids CMake target namespace collisions and allows tighter control over configuration.
+
+**Key Configuration Details:**
+1.  **Source Directories:** We explicitly add sources from `FatFs_SPI/sd_driver`, `FatFs_SPI/ff15/source`, and `FatFs_SPI/src/glue.c`.
+2.  **Include Paths:** We manually add include directories for `sd_driver`, `include`, and `ff15/source`. Note that `FetchContent` variables are lowercase (e.g., `${no-os-fatfs..._SOURCE_DIR}`).
+3.  **RTC Stub:** We use a local `lib/sd_card/my_rtc.c` to stub `get_fattime()`. We do *not* link `hardware_rtc` or compile the library's `rtc.c` to avoid SDK include path issues.
+4.  **Hardware Links:** The target must explicitly link `hardware_spi`.
+
+### Architecture
 
 **IMPORTANT**: This project uses a Redux-inspired reactive architecture. Before modifying state management or adding features, read [docs/reactive_architecture.md](docs/reactive_architecture.md).
 
