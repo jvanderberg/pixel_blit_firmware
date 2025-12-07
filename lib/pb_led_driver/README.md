@@ -177,11 +177,140 @@ pb_raster_show(driver, raster);
 pb_show(driver);
 ```
 
-**Wrap Modes**:
-- `PB_WRAP_CLIP`: Each row is one string (row Y = string Y)
-- `PB_WRAP_NONE`: Sequential pixel mapping
-- `PB_WRAP_ZIGZAG`: Serpentine for folded LED strips
-- `PB_WRAP_CHAIN`: Chain multiple strings into longer rows
+## Wrap Modes Explained
+
+Wrap modes control how 2D raster coordinates (x, y) map to physical LED positions (string, pixel). Choose based on your physical LED layout.
+
+### PB_WRAP_CLIP (Default)
+
+**Use case**: Multiple independent LED strings, each driven as a separate row.
+
+Each row Y maps to string Y. Pixel X maps directly to pixel position. This is the simplest mapping where each string is a horizontal row.
+
+```
+Raster (5x3):              Physical Layout:
+                           String 0: [0][1][2][3][4]
+  y=0: [0,0][1,0][2,0]...  String 1: [0][1][2][3][4]
+  y=1: [0,1][1,1][2,1]...  String 2: [0][1][2][3][4]
+  y=2: [0,2][1,2][2,2]...
+
+  (x,y) → string=y, pixel=x
+```
+
+```c
+pb_raster_config_t cfg = {
+    .width = 50,
+    .height = 32,
+    .wrap_mode = PB_WRAP_CLIP,
+};
+// Result: 32 strings, 50 pixels each
+// raster(10, 5) → string 5, pixel 10
+```
+
+### PB_WRAP_ZIGZAG
+
+**Use case**: Folded/serpentine LED strips where alternating rows run in opposite directions.
+
+Common when a single long strip is folded back and forth to create a matrix. Odd rows are reversed.
+
+```
+Physical wiring (single strip folded):
+
+  String 0: [0]→[1]→[2]→[3]→[4]
+                              ↓
+  String 1: [9]←[8]←[7]←[6]←[5]
+            ↓
+  String 2: [10]→[11]→[12]→[13]→[14]
+
+Raster mapping:
+  y=0: pixels 0-4  (left to right)
+  y=1: pixels 9-5  (right to left, reversed!)
+  y=2: pixels 10-14 (left to right)
+
+  raster(0,0)=pixel 0,  raster(4,0)=pixel 4
+  raster(0,1)=pixel 9,  raster(4,1)=pixel 5  ← reversed
+  raster(0,2)=pixel 10, raster(4,2)=pixel 14
+```
+
+```c
+pb_raster_config_t cfg = {
+    .width = 5,
+    .height = 3,
+    .wrap_mode = PB_WRAP_ZIGZAG,
+};
+// Handles the serpentine reversal automatically
+```
+
+### PB_WRAP_CHAIN
+
+**Use case**: Multiple physical strings chained together to form longer logical rows.
+
+When your display width exceeds max_pixel_length, chain multiple strings end-to-end.
+
+```
+Example: 100-pixel wide display, but strings are 50 pixels max
+
+Physical strings:
+  String 0: [pixels 0-49]   ← first half of row 0
+  String 1: [pixels 0-49]   ← second half of row 0
+  String 2: [pixels 0-49]   ← first half of row 1
+  String 3: [pixels 0-49]   ← second half of row 1
+
+Raster (100x2):
+  y=0: x=0-49  → string 0, pixel 0-49
+       x=50-99 → string 1, pixel 0-49
+  y=1: x=0-49  → string 2, pixel 0-49
+       x=50-99 → string 3, pixel 0-49
+```
+
+```c
+pb_raster_config_t cfg = {
+    .width = 100,
+    .height = 2,
+    .wrap_mode = PB_WRAP_CHAIN,
+    .chain_length = 50,  // pixels per physical string
+};
+// raster(75, 0) → string 1, pixel 25
+// raster(75, 1) → string 3, pixel 25
+```
+
+**Note**: Width must be evenly divisible by chain_length.
+
+### PB_WRAP_NONE
+
+**Use case**: Raw sequential mapping with no special handling.
+
+Pixels are mapped linearly across all strings. When one string fills, continues to the next.
+
+```
+Raster (8x2) with 5 pixels per string:
+
+  Linear index: 0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15
+                └──string 0──┘  └──string 1──┘  └──string 2──┘  └─string 3─┘
+
+  raster(0,0)=idx 0  → string 0, pixel 0
+  raster(4,0)=idx 4  → string 0, pixel 4
+  raster(5,0)=idx 5  → string 1, pixel 0  ← wrapped to next string
+  raster(0,1)=idx 8  → string 1, pixel 3
+```
+
+```c
+pb_raster_config_t cfg = {
+    .width = 8,
+    .height = 2,
+    .wrap_mode = PB_WRAP_NONE,
+};
+// Continuous linear mapping across strings
+```
+
+### Choosing the Right Wrap Mode
+
+| Layout | Wrap Mode | Notes |
+|--------|-----------|-------|
+| Parallel strings (standard matrix) | `PB_WRAP_CLIP` | Row Y = String Y |
+| Folded single strip | `PB_WRAP_ZIGZAG` | Handles direction reversal |
+| Wide display from short strings | `PB_WRAP_CHAIN` | Concatenates strings |
+| Custom/raw access | `PB_WRAP_NONE` | Linear sequential |
 
 ### Color Utilities
 
