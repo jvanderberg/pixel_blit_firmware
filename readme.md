@@ -118,30 +118,53 @@ See [docs/reactive_architecture.md](docs/reactive_architecture.md) for detailed 
 
 
 ## Pinout
-Key: GPIO*  RP2350B GPIO output/input
-String*     LED data output
-HS_DATA*    Interboard communications LVDS lines
-Board Address is a 4 pin DIP switch. The closed ends of the switch are tied to a common voltage divider with 47kOhms to 3v3, and 1kOhm to GPIO40/ADC0. The four open pins are individually tied to ground via a 47k, 100k, 220k, and 470k resistor. This is designed to give an analog voltage that can be decoded to determine which dip switches are set.
-SD_*        SD Card interface
 
+### Legend
 
-GPIO0-31    String0-String31
-GPIO32      HS_DATA3 (If Board address == 0 ? OUT : IN)
-GPIO33      HS_DATA2 (If Board address == 0 ? OUT : IN)
-GPIO34      HS_DATA1 (If Board address == 0 ? OUT : IN)
-GPIO35      HS_DATA0 (If Board address == 0 ? OUT : IN)
-GPIO36      SD_MISO
-GPIO37      SD_CS#
-GPIO38      SD_SCK
-GPIO39      SD_MOSI
-GPIO40/ADC0 Board address in (IN Analog)
-GPIO41/ADC1 Audio Level in (IN Analog)
-GPIO42      IR In (IN Digital)
-GPIO43      Select BTN (In Digital)
-GPIO44      DATA_IN_EN (Out Digital - HIGH if board address != 0)
-GPIO45      Next BTN (In Digital)
-GPIO46      DISP_SDA (Out Digital)
-GPIO47      DISP_SDL (Out Digital)
+| Prefix | Description |
+|--------|-------------|
+| String* | LED data output |
+| HS_DATA* | Interboard LVDS communication lines |
+| SD_* | SD Card interface |
+
+### GPIO Assignments
+
+| GPIO | Function | Direction | Notes |
+|------|----------|-----------|-------|
+| 0-31 | String0-String31 | Output | LED data outputs |
+| 32 | HS_DATA3 | OUT/IN | Output if board address = 0, else input |
+| 33 | HS_DATA2 | OUT/IN | Output if board address = 0, else input |
+| 34 | HS_DATA1 | OUT/IN | Output if board address = 0, else input |
+| 35 | HS_DATA0 | OUT/IN | Output if board address = 0, else input |
+| 36 | SD_MISO | Input | SD Card data in |
+| 37 | SD_CS# | Output | SD Card chip select |
+| 38 | SD_SCK | Output | SD Card clock |
+| 39 | SD_MOSI | Output | SD Card data out |
+| 40/ADC0 | Board Address | Analog In | DIP switch voltage divider |
+| 41/ADC1 | Audio Level | Analog In | Audio input level |
+| 42 | IR In | Digital In | Infrared receiver |
+| 43 | Select BTN | Digital In | Select button (active low) |
+| 44 | DATA_IN_EN | Digital Out | HIGH if board address != 0 |
+| 45 | Next BTN | Digital In | Next button (active low) |
+| 46 | DISP_SDA | Digital Out | I2C display data |
+| 47 | DISP_SCL | Digital Out | I2C display clock |
+
+### Board Address DIP Switch
+
+The board address is set via a 4-position DIP switch using an analog voltage divider:
+
+```
+3.3V ──┬── 47kΩ ──┬── GPIO40/ADC0
+       │          │
+       │    ┌─ SW1 ─── 47kΩ  ──┐
+       │    ├─ SW2 ─── 100kΩ ──┤
+       │    ├─ SW3 ─── 220kΩ ──┼── GND
+       │    └─ SW4 ─── 470kΩ ──┘
+       │          │
+       └── 1kΩ ───┘
+```
+
+Each switch combination produces a unique analog voltage that can be decoded to determine the board address (0-15).
 
 
 ## Prototypes
