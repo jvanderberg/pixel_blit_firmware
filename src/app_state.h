@@ -41,8 +41,6 @@ typedef struct {
 typedef struct {
     TestRunState run_state;
     uint8_t current_string;
-    uint8_t hue_offset;
-    uint32_t frame_count;
     uint16_t fps;
 } RainbowTestState;
 
@@ -78,8 +76,6 @@ static inline AppState app_state_init(void) {
         .rainbow_test = {
             .run_state = TEST_STOPPED,
             .current_string = 0,
-            .hue_offset = 0,
-            .frame_count = 0,
             .fps = 0,
         },
         .uptime_seconds = 0,

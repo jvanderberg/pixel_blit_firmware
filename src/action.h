@@ -12,7 +12,6 @@ typedef enum {
 
     // Timer events
     ACTION_TICK_1S,          // 1 second tick for uptime, logging
-    ACTION_TICK_FAST,        // Fast tick for animations
 
     // Sensor events
     ACTION_BOARD_ADDRESS_UPDATED,
@@ -66,13 +65,6 @@ static inline Action action_button_next(uint32_t timestamp) {
 static inline Action action_tick_1s(uint32_t timestamp) {
     return (Action){
         .type = ACTION_TICK_1S,
-        .timestamp = timestamp,
-    };
-}
-
-static inline Action action_tick_fast(uint32_t timestamp) {
-    return (Action){
-        .type = ACTION_TICK_FAST,
         .timestamp = timestamp,
     };
 }

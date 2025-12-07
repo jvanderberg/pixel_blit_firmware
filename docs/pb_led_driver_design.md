@@ -332,3 +332,29 @@ Per pixel position (all 32 strings): 3 channels × 32 bytes = **96 bytes**
 #define PB_MAX_PIXELS 256    // Max pixels per string
 #define PB_MAX_STRINGS 32    // Fixed: 32 GPIOs
 ```
+
+## Offline Playback (Planned: xLights .fseq Support)
+
+The driver will be extended to support high-performance playback of pre-rendered sequences from an SD card, specifically the **xLights `.fseq` (v2)** format. This will allow complex animations designed on a PC to be played back on the microcontroller without heavy runtime calculation.
+
+### Planned Pipeline (Data Plane / Core 1)
+
+Playback will run as a streaming loop on Core 1:
+
+1.  **Read:** Raw RGB bytes will be read from the SD card in 512-byte blocks (aligning with sectors for speed).
+2.  **Encode:** The raw RGB data will be immediately encoded into the **Bit-Plane Buffer** using `pb_set_pixel()`. This step essentially "un-interleaves" the bytes into the DMA-ready format.
+3.  **Show:** When a full frame is ready and the frame timer elapses, `pb_show()` will trigger the DMA transfer.
+
+### File Format Strategy
+
+To minimize runtime overhead, we will use a **"One File Per Board"** strategy (or a "Master File with Offset" strategy).
+
+*   **Structure:** The `.fseq` file contains a header (FPS, Frame Count) followed by a flat stream of RGB data.
+*   **Mapping:** xLights handles all complex mapping (Matrix, Tree, 3D shapes). The firmware will see a simple linear array of channels.
+    *   `Channel 0-2` -> String 0, Pixel 0 (RGB)
+    *   `Channel 3-5` -> String 0, Pixel 1 (RGB)
+    *   ...
+    *   `Channel N` -> String 1, Pixel 0 (RGB)
+
+This makes the firmware "dumb" and efficient. It simply streams bytes from disk to GPIOs.
+

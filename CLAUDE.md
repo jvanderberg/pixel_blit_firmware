@@ -4,6 +4,20 @@
 
 This is firmware for a 32-channel addressable LED controller based on the RP2350B microcontroller. The firmware controls WS2811/WS2812 LED strings via PIO, with a menu-driven OLED interface.
 
+## Build Instructions
+
+Use the provided build script:
+```bash
+./build.sh
+```
+
+Or manually:
+```bash
+mkdir -p build && cd build
+cmake -G Ninja ..
+ninja
+```
+
 ## Architecture
 
 **IMPORTANT**: This project uses a Redux-inspired reactive architecture. Before modifying state management or adding features, read [docs/reactive_architecture.md](docs/reactive_architecture.md).

@@ -14,8 +14,8 @@ typedef struct
     pb_driver_t *driver;
     pb_raster_t *raster;
     int raster_id;
-    bool running;
-    uint8_t current_string;
+    volatile bool running;
+    volatile uint8_t current_string;
     uint8_t hue_offset;
     uint32_t frame_count;
     uint64_t fps_last_time_us;

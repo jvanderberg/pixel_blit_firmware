@@ -31,7 +31,6 @@ static AppState handle_select_menu(const AppState* state) {
             break;
         case MENU_RAINBOW_TEST:
             new_state.rainbow_test.run_state = TEST_RUNNING;
-            new_state.rainbow_test.frame_count = 0;
             new_state.rainbow_test.fps = 0;
             break;
         default:
@@ -108,19 +107,6 @@ static AppState handle_tick_1s(const AppState* state) {
     return new_state;
 }
 
-// Handle fast tick (for animations)
-static AppState handle_tick_fast(const AppState* state) {
-    // Only update if rainbow test is running
-    if (state->rainbow_test.run_state != TEST_RUNNING) {
-        return *state;  // No change
-    }
-
-    AppState new_state = app_state_new_version(state);
-    new_state.rainbow_test.hue_offset = state->rainbow_test.hue_offset + 1;
-    new_state.rainbow_test.frame_count = state->rainbow_test.frame_count + 1;
-    return new_state;
-}
-
 // Handle board address update
 static AppState handle_board_address_updated(const AppState* state, const Action* action) {
     // Only update if values actually changed
@@ -159,9 +145,6 @@ AppState reduce(const AppState* state, const Action* action) {
 
         case ACTION_TICK_1S:
             return handle_tick_1s(state);
-
-        case ACTION_TICK_FAST:
-            return handle_tick_fast(state);
 
         case ACTION_BOARD_ADDRESS_UPDATED:
             return handle_board_address_updated(state, action);

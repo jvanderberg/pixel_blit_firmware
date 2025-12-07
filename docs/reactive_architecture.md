@@ -14,6 +14,18 @@ Hardware Events → Actions → Pure Reducer → New State
                          SideEffects + View Update
 ```
 
+## Core 0 vs Core 1 (Control Plane vs Data Plane)
+
+To ensure high-performance LED driving without blocking the UI, the system is split between two cores:
+
+*   **Core 0 (Control Plane)**: Runs the Reactive/Redux loop (UI, Buttons, State Management). It is the "Single Source of Truth" for application configuration.
+*   **Core 1 (Data Plane)**: Runs high-speed animation loops. It treats the AppState configuration as read-only inputs and drives the hardware directly.
+
+### Communication Strategy
+*   **Core 0 -> Core 1**: Core 0 writes configuration (e.g., `current_string`, `run_state`) to the `RainbowTestState` context. These fields are marked `volatile`.
+*   **Core 1 -> Core 0**: Core 1 writes telemetry (e.g., `fps`) to the context.
+*   **No Shared Logic**: The Reducer on Core 0 does *not* simulate animation physics (like incrementing hue). It only manages the "What" (which test is running), while Core 1 manages the "How" (rendering pixels).
+
 ## Core Components
 
 ### 1. AppState (Immutable State Container)
