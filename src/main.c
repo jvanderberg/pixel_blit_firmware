@@ -246,17 +246,14 @@ int main() {
 
         // Rainbow test runs on core1 - nothing to do here
 
-        // Periodic display refresh for FPS display
+        // Periodic FPS update for rainbow test display
         if (current_state.in_detail_view &&
             current_state.menu_selection == MENU_RAINBOW_TEST &&
             absolute_time_diff_us(last_display_refresh, now) >= DISPLAY_REFRESH_US) {
             last_display_refresh = now;
-            // Update FPS in state for display
             uint16_t fps = rainbow_test_get_fps(hw_context.rainbow_test);
             if (fps != current_state.rainbow_test.fps) {
                 dispatch(action_rainbow_frame_complete(now_us, fps));
-            } else {
-                views_render(&display, &current_state);
             }
         }
 
