@@ -126,7 +126,7 @@ void rainbow_test_task(rainbow_test_t *ctx)
     }
 
     // Fill background with dim white
-    pb_raster_fill(ctx->raster, 0x101010);
+    pb_raster_fill(ctx->raster, 0xFFFFFF);
 
     // Draw rainbow on selected string
     uint8_t y = ctx->current_string;
