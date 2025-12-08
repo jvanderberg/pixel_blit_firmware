@@ -2,14 +2,35 @@
 #include <stdio.h>
 #include <string.h>
 
+static const char* menu_labels[MENU_COUNT] = {
+    "Info",
+    "Board Address",
+    "SD Card",
+    "String Test",
+    "Toggle Test",
+    "Rainbow Test",
+};
+
 static void render_main_menu(sh1106_t* display, const AppState* state) {
     sh1106_clear(display);
     sh1106_draw_string(display, 0, 0, "Pixel Blit v1.1", false);
-    sh1106_draw_string(display, 0, 10, "Info", state->menu_selection == MENU_INFO);
-    sh1106_draw_string(display, 0, 20, "Board Address", state->menu_selection == MENU_BOARD_ADDRESS);
-    sh1106_draw_string(display, 0, 30, "SD Card", state->menu_selection == MENU_SD_CARD);
-    sh1106_draw_string(display, 0, 40, "String Test", state->menu_selection == MENU_STRING_TEST);
-    sh1106_draw_string(display, 0, 50, "Toggle Test", state->menu_selection == MENU_TOGGLE_TEST);
+
+    // Show 5 menu items with scrolling window
+    #define MENU_VISIBLE 5
+    int selection = state->menu_selection;
+
+    // Calculate window start so selection is visible
+    int window_start = 0;
+    if (selection >= MENU_VISIBLE) {
+        window_start = selection - MENU_VISIBLE + 1;
+    }
+
+    for (int i = 0; i < MENU_VISIBLE && (window_start + i) < MENU_COUNT; i++) {
+        int item = window_start + i;
+        bool selected = (item == selection);
+        sh1106_draw_string(display, 0, 10 + i * 10, menu_labels[item], selected);
+    }
+
     sh1106_render(display);
 }
 

@@ -204,6 +204,9 @@ int main() {
     // Render initial view
     views_render(&display, &current_state);
 
+    // Configure SD card library to use DMA_IRQ_1 (IRQ_0 is used by pb_led_driver)
+    set_spi_dma_irq_channel(true, true);  // useChannel1=true, shared=true
+
     // Timing
     absolute_time_t last_tick_1s = get_absolute_time();
     absolute_time_t last_display_refresh = get_absolute_time();

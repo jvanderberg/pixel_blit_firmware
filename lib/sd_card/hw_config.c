@@ -18,15 +18,16 @@ This file should be tailored to your hardware configuration.
 */
 
 #include "hw_config.h"
-#include "diskio.h" 
+#include "diskio.h"
 
 /* Configuration of RP2350 SPI object */
 static spi_t sd_spi = {
-    .hw_inst = spi1,  // SPI component (macro from SDK)
+    .hw_inst = spi0,  // SPI component - GPIO 36-39 are SPI0 pins (not SPI1!)
     .miso_gpio = 36,  // GPIO number (not pin number)
     .mosi_gpio = 39,
     .sck_gpio = 38,
-    .baud_rate = 12500 * 1000, // 12.5 MHz (Start slow, increase later)
+    .baud_rate = 100 * 1000, // 100 kHz (Required for init)
+    //.baud_rate = 12500 * 1000, // 12.5 MHz
     //.baud_rate = 25 * 1000 * 1000, // 25 MHz
 };
 
