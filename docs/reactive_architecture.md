@@ -26,6 +26,45 @@ To ensure high-performance LED driving without blocking the UI, the system is sp
 *   **Core 1 -> Core 0**: Core 1 writes telemetry (e.g., `fps`) to the context.
 *   **No Shared Logic**: The Reducer on Core 0 does *not* simulate animation physics (like incrementing hue). It only manages the "What" (which test is running), while Core 1 manages the "How" (rendering pixels).
 
+### Memory Barriers for Cross-Core Communication
+
+On ARM multicore, `volatile` alone is insufficient for cross-core visibility. We use `__dmb()` (Data Memory Barrier) from `hardware/sync.h` to ensure writes are visible.
+
+**Pattern for Core 0 (writer):**
+```c
+#include "hardware/sync.h"
+
+// Starting Core 1
+rainbow_core1_running = true;
+__dmb();  // Ensure flag is visible before launch
+multicore_launch_core1(core1_rainbow_entry);
+
+// Stopping Core 1
+rainbow_core1_running = false;
+__dmb();  // Ensure flag is visible so Core 1 exits
+sleep_ms(20);  // Allow Core 1 to exit gracefully
+multicore_reset_core1();
+```
+
+**Pattern for Core 1 (reader):**
+```c
+void core1_rainbow_entry(void) {
+    while (true) {
+        __dmb();  // Ensure we see latest flag value from Core 0
+        if (!rainbow_core1_running) break;
+        rainbow_test_task(&rainbow_test_ctx);
+    }
+}
+```
+
+**Why this matters:**
+- Without `__dmb()`, Core 1 might loop forever reading a stale `true` value
+- The barrier forces pending writes to complete and subsequent reads to see them
+- This is lower overhead than FIFO for simple flag-based start/stop control
+
+**Alternative - Multicore FIFO:**
+For more complex command/response patterns, consider `multicore_fifo_push_blocking()` / `multicore_fifo_pop_blocking()` which handle synchronization automatically.
+
 ## Core Components
 
 ### 1. AppState (Immutable State Container)
