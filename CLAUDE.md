@@ -62,6 +62,7 @@ Hardware Events → Actions → Reducer → New State → SideEffects + View
 ## Hardware Details
 
 - **GPIO 0-31**: LED string outputs (directly mapped: String N = GPIO N)
+- **GPIO 42**: IR receiver input (active low, NEC protocol)
 - **GPIO 43**: Select button (active low, needs debounce)
 - **GPIO 45**: Next button (active low, needs debounce)
 - **GPIO 46-47**: I2C OLED display (SH1106, 128x64)
@@ -83,6 +84,15 @@ Hardware Events → Actions → Reducer → New State → SideEffects + View
 2. **Button debounce**: Use 200ms debounce minimum. The buttons have significant bounce.
 
 3. **Blocking in main loop**: Avoid blocking calls in the main loop as they affect all tasks. Use timer-based scheduling instead.
+
+4. **Single GPIO callback per core**: Pico SDK only allows ONE `gpio_set_irq_enabled_with_callback()` per core. All GPIO interrupts (buttons, IR, etc.) must share a combined ISR. Use `gpio_set_irq_enabled()` for additional pins after the initial callback setup.
+
+## Running Tests
+
+The pb_led_driver library has host-based unit tests:
+```bash
+./run_tests.sh
+```
 
 ## Reference Implementation
 

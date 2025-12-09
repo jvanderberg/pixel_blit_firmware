@@ -72,6 +72,7 @@ add_executable(pixel_blit_firmware
         toggle_test.c
         rainbow_test.c
         fseq_player.c
+        ir_control.c
         lib/sd_card/hw_config.c
         
         # FatFS / SD Card Driver Sources

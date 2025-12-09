@@ -18,6 +18,9 @@
 // FSEQ Player
 #include "fseq_player.h"
 
+// IR Remote Control
+#include "ir_control.h"
+
 #include "app_state.h"
 #include "action.h"
 #include "reducer.h"
@@ -127,8 +130,8 @@ static uint16_t sample_board_address_adc(void) {
     return (uint16_t)(acc / BOARD_ADDR_SAMPLES);
 }
 
-// Button ISR with debouncing
-static void button_isr(uint gpio, uint32_t events) {
+// Combined GPIO ISR for buttons and IR
+static void gpio_isr(uint gpio, uint32_t events) {
     uint64_t now = time_us_64();
 
     if (gpio == BTN_SELECT_PIN && (events & GPIO_IRQ_EDGE_FALL)) {
@@ -141,6 +144,8 @@ static void button_isr(uint gpio, uint32_t events) {
             next_pressed = true;
             next_last_press_us = now;
         }
+    } else if (gpio == IR_PIN && (events & GPIO_IRQ_EDGE_FALL)) {
+        ir_process_edge();
     }
 }
 
@@ -216,9 +221,14 @@ int main() {
     // Initialize application state
     current_state = app_state_init();
 
-    // Setup button interrupts
-    gpio_set_irq_enabled_with_callback(BTN_SELECT_PIN, GPIO_IRQ_EDGE_FALL, true, button_isr);
+    // Initialize IR receiver
+    ir_init(IR_PIN);
+    printf("IR receiver initialized on GPIO %d\n", IR_PIN);
+
+    // Setup GPIO interrupts (combined callback for buttons and IR)
+    gpio_set_irq_enabled_with_callback(BTN_SELECT_PIN, GPIO_IRQ_EDGE_FALL, true, gpio_isr);
     gpio_set_irq_enabled(BTN_NEXT_PIN, GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(IR_PIN, GPIO_IRQ_EDGE_FALL, true);
 
     // Render initial view
     views_render(&display, &current_state);
@@ -245,6 +255,13 @@ int main() {
         if (next_pressed) {
             next_pressed = false;
             dispatch(action_button_next(now_us));
+        }
+
+        // Handle IR remote commands
+        uint8_t ir_code;
+        if (ir_get_next_command(&ir_code)) {
+            printf("IR: Received code 0x%02X\n", ir_code);
+            // TODO: Map IR codes to actions
         }
 
         // SD Card Scan (only once when entering SD view)
@@ -309,10 +326,11 @@ int main() {
             dispatch(action_tick_1s(now_us));
 
             // Log state periodically
-            printf("Menu=%d View=%s Uptime=%lu\n",
+            printf("Menu=%d View=%s Uptime=%lu IR_edges=%lu\n",
                    current_state.menu_selection,
                    current_state.in_detail_view ? "Detail" : "Menu",
-                   (unsigned long)current_state.uptime_seconds);
+                   (unsigned long)current_state.uptime_seconds,
+                   (unsigned long)ir_get_edge_count());
         }
 
         // Sample board address periodically (every 100ms)
