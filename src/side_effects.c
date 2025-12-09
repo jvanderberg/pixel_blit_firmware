@@ -2,6 +2,7 @@
 #include "views.h"
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
+#include "hardware/sync.h"  // For __dmb() memory barrier
 
 #include <stdio.h>
 
@@ -67,11 +68,13 @@ void side_effects_apply(const HardwareContext* hw,
             if (!rainbow_core1_running && !fseq_core1_running) {
                 rainbow_test_start(hw->rainbow_test);
                 rainbow_core1_running = true;
+                __dmb();  // Ensure flag is visible to Core1 before launch
                 multicore_launch_core1(core1_rainbow_entry);
             }
         } else {
             // Signal Core 1 to stop and wait for it to exit gracefully
             rainbow_core1_running = false;
+            __dmb();  // Ensure flag is visible to Core1
             sleep_ms(20);  // Allow Core 1 to finish current frame and exit loop
             multicore_reset_core1();
             rainbow_test_stop(hw->rainbow_test);
@@ -93,11 +96,13 @@ void side_effects_apply(const HardwareContext* hw,
                 const char* filename = sd_file_list[new_state->sd_card.playing_index];
                 fseq_player_start(hw->fseq_player, filename);
                 fseq_core1_running = true;
+                __dmb();  // Ensure flag is visible to Core1 before launch
                 multicore_launch_core1(core1_fseq_entry);
             }
         } else {
             // Signal Core 1 to stop - let it exit gracefully to close file properly
             fseq_core1_running = false;
+            __dmb();  // Ensure flag is visible to Core1
             // Wait for Core 1 to exit (it checks the flag each frame)
             // At 60fps, frames are ~16ms, so 100ms is plenty
             sleep_ms(100);

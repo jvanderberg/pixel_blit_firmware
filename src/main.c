@@ -9,6 +9,7 @@
 #include "hardware/i2c.h"
 #include "hardware/adc.h"
 #include "hardware/gpio.h"
+#include "hardware/sync.h"  // For __dmb() memory barrier
 
 // SD Card / FatFS
 #include "ff.h"
@@ -63,7 +64,9 @@ char sd_file_list[SD_MAX_FILES][SD_FILENAME_LEN];
 volatile bool rainbow_core1_running = false;
 
 void core1_rainbow_entry(void) {
-    while (rainbow_core1_running) {
+    while (true) {
+        __dmb();  // Ensure we see latest flag value from Core0
+        if (!rainbow_core1_running) break;
         rainbow_test_task(&rainbow_test_ctx);
     }
 }

@@ -1,6 +1,7 @@
 #include "fseq_player.h"
 #include "fseq_parser.h"
 #include "pico/stdlib.h"
+#include "hardware/sync.h"  // For __dmb() memory barrier
 #include "ff.h"
 #include "sd_card.h"
 #include "hw_config.h"
@@ -234,7 +235,10 @@ void fseq_player_core1_entry(void) {
     uint32_t fps_frame_count = 0;
     uint64_t last_fps_time = time_us_64();
 
-    while (fseq_core1_running && !ctx->stop_requested) {
+    while (true) {
+        __dmb();  // Ensure we see latest flag value from Core0
+        if (!fseq_core1_running || ctx->stop_requested) break;
+
         // Loop based on header frame count, not EOF
         if (frames_played >= header.frame_count) {
             f_lseek(&g_fseq_file, header.channel_data_offset);
