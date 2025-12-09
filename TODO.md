@@ -1,7 +1,26 @@
 # TODO
-1. Add a global 'on/off' flag. When 'off', the display should turn off, any button should wake it up, and show the main menu. Add a menu item 'shutdown.' When in the off state, all polling is halted but for the two buttons, and all LED output is stopped. Add a handler for the power button on the IR remote to toggle this.
-2. Add an IR button handler for the 'next' button which plays the next show on the SD card. If no show is playing, it should load the list and play the first one, wrap around at the end. The display should keep up to date with this, even if the IR remote is doing the commands, so you will need to do 'dispatches', or have special reducer logic to update menu state.
-3. Add a global brightness setting, defaulted to 255, which gets mixed in at the pb layer. The IR remote brightness buttons should increment and decrement this value in 10 discrete steps. Add a 'brightness' menu this allows you to cycle through 1-10 brightness.
+
+1. ~~Add a global 'on/off' flag. When 'off', the display should turn off, any button should wake it up, and show the main menu. Add a menu item 'shutdown.' When in the off state, all polling is halted but for the two buttons, and all LED output is stopped. Add a handler for the power button on the IR remote to toggle this.~~ ✅
+
+2. ~~Add an IR button handler for the 'next' button which plays the next show on the SD card. If no show is playing, it should load the list and play the first one, wrap around at the end. The display should keep up to date with this, even if the IR remote is doing the commands, so you will need to do 'dispatches', or have special reducer logic to update menu state.~~ ✅
+
+3. ~~Add a global brightness setting, defaulted to 255, which gets mixed in at the pb layer. The IR remote brightness buttons should increment and decrement this value in 10 discrete steps. Add a 'brightness' menu this allows you to cycle through 1-10 brightness.~~ ✅
+
+4. Add SD card configuration file (`config.csv`) for board/string layout. On startup, the board should:
+   - Sample the board address ADC to determine its board ID (0-15)
+   - Read `config.csv` from SD card root
+   - Parse rows to get per-string configuration for this board
+   - File format: each row is a string, every 32 rows is a board
+   - Each row specifies: pixel count, color order (RGB, GRB, BGR, RBG, GBR, BRG)
+   - Example:
+     ```
+     50,GRB
+     50,GRB
+     100,RGB
+     ...
+     ```
+   - Board 0 reads rows 0-31, Board 1 reads rows 32-63, etc.
+   - This replaces hardcoded string configurations
 
 
 ## Future Improvements
