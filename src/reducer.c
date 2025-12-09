@@ -23,6 +23,11 @@ static AppState handle_select_menu(const AppState* state) {
     new_state = stop_other_tests(new_state, state->menu_selection);
 
     switch (state->menu_selection) {
+        case MENU_SD_CARD:
+            // Trigger a fresh scan when entering SD card view
+            new_state.sd_card.needs_scan = true;
+            new_state.sd_card.scroll_index = 0;
+            break;
         case MENU_STRING_TEST:
             new_state.string_test.run_state = TEST_RUNNING;
             break;
@@ -62,9 +67,33 @@ static AppState handle_select_detail(const AppState* state) {
             return new_state;
         }
 
+        case MENU_SD_CARD: {
+            // If playing, SELECT stops playback
+            if (state->sd_card.is_playing) {
+                AppState new_state = app_state_new_version(state);
+                new_state.sd_card.is_playing = false;
+                return new_state;
+            }
+
+            // SELECT on [Main Menu] - exit
+            if (state->sd_card.scroll_index >= state->sd_card.file_count) {
+                AppState new_state = app_state_new_version(state);
+                new_state.in_detail_view = false;
+                return new_state;
+            }
+
+            // SELECT on a file - start playback
+            AppState new_state = app_state_new_version(state);
+            new_state.sd_card.is_playing = true;
+            int idx = state->sd_card.scroll_index;
+            for (int i = 0; i < SD_FILENAME_LEN; i++) {
+                new_state.sd_card.current_file[i] = sd_file_list[idx][i];
+            }
+            return new_state;
+        }
+
         case MENU_INFO:
         case MENU_BOARD_ADDRESS:
-        case MENU_SD_CARD:
         default: {
             // Exit detail view
             AppState new_state = app_state_new_version(state);
@@ -86,7 +115,22 @@ static AppState handle_button_select(const AppState* state) {
 // Handle NEXT button
 static AppState handle_button_next(const AppState* state) {
     if (state->in_detail_view) {
-        // Exit detail view and stop any running tests
+        // Special handling for SD Card
+        if (state->menu_selection == MENU_SD_CARD) {
+            // If playing, NEXT stops playback
+            if (state->sd_card.is_playing) {
+                AppState new_state = app_state_new_version(state);
+                new_state.sd_card.is_playing = false;
+                return new_state;
+            }
+            // Scroll through files
+            AppState new_state = app_state_new_version(state);
+            uint8_t total_items = state->sd_card.file_count + 1;  // +1 for [Main Menu]
+            new_state.sd_card.scroll_index = (state->sd_card.scroll_index + 1) % total_items;
+            return new_state;
+        }
+
+        // Default: Exit detail view and stop any running tests
         AppState new_state = app_state_new_version(state);
         new_state.in_detail_view = false;
         new_state.string_test.run_state = TEST_STOPPED;
@@ -124,13 +168,37 @@ static AppState handle_board_address_updated(const AppState* state, const Action
     return new_state;
 }
 
-// Handle SD Card Status
-static AppState handle_sd_status(const AppState* state, const Action* action) {
+// Handle SD Card Mounted
+static AppState handle_sd_mounted(const AppState* state) {
     AppState new_state = app_state_new_version(state);
-    new_state.sd_card.mounted = action->payload.sd_card.mounted;
-    // Copy string safely
-    for(int i=0; i<64; i++) {
-        new_state.sd_card.message[i] = action->payload.sd_card.message[i];
+    new_state.sd_card.mounted = true;
+    for(int i=0; i<24; i++) new_state.sd_card.status_msg[i] = 0;
+    return new_state;
+}
+
+// Handle SD Card Error
+static AppState handle_sd_error(const AppState* state, const Action* action) {
+    AppState new_state = app_state_new_version(state);
+    new_state.sd_card.mounted = false;
+    new_state.sd_card.needs_scan = false;  // Scan complete (failed)
+    new_state.sd_card.file_count = 0;
+    for(int i=0; i<24; i++) {
+        new_state.sd_card.status_msg[i] = action->payload.sd_error.message[i];
+    }
+    return new_state;
+}
+
+// Handle SD Files Loaded
+static AppState handle_sd_files(const AppState* state, const Action* action) {
+    AppState new_state = app_state_new_version(state);
+    new_state.sd_card.mounted = true;
+    new_state.sd_card.needs_scan = false;  // Scan complete
+    new_state.sd_card.file_count = action->payload.sd_files.count;
+    new_state.sd_card.scroll_index = 0;
+    // Files already stored in sd_file_list static buffer by main.c
+    if(new_state.sd_card.file_count == 0) {
+        const char* msg = "No .fseq files";
+        for(int i=0; msg[i] && i<23; i++) new_state.sd_card.status_msg[i] = msg[i];
     }
     return new_state;
 }
@@ -161,8 +229,14 @@ AppState reduce(const AppState* state, const Action* action) {
         case ACTION_BOARD_ADDRESS_UPDATED:
             return handle_board_address_updated(state, action);
 
-        case ACTION_SD_CARD_STATUS:
-            return handle_sd_status(state, action);
+        case ACTION_SD_CARD_MOUNTED:
+            return handle_sd_mounted(state);
+
+        case ACTION_SD_CARD_ERROR:
+            return handle_sd_error(state, action);
+
+        case ACTION_SD_FILES_LOADED:
+            return handle_sd_files(state, action);
 
         case ACTION_RAINBOW_FRAME_COMPLETE:
             return handle_rainbow_frame_complete(state, action);

@@ -4,6 +4,7 @@
 #include "../string_test.h"
 #include "../toggle_test.h"
 #include "../rainbow_test.h"
+#include "../fseq_player.h"
 #include "../sh1106.h"
 
 // Hardware context passed to side effects
@@ -12,6 +13,7 @@ typedef struct {
     string_test_t* string_test;
     toggle_test_t* toggle_test;
     rainbow_test_t* rainbow_test;
+    fseq_player_t* fseq_player;
 } HardwareContext;
 
 // Initialize hardware context

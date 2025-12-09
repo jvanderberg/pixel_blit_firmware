@@ -270,6 +270,17 @@ void pb_raster_destroy(pb_driver_t* driver, int raster_id) {
     }
 }
 
+void pb_raster_destroy_all(pb_driver_t* driver) {
+    // Destroy all rasters associated with this driver
+    for (int i = 0; i < PB_MAX_RASTERS; i++) {
+        if (raster_storage[i].active && raster_storage[i].driver == driver) {
+            raster_storage[i].active = false;
+        }
+    }
+    // Reset pool since driver is going away
+    pool_used = 0;
+}
+
 void pb_raster_set_pixel(pb_raster_t* raster, uint16_t x, uint16_t y, pb_color_t color) {
     if (raster == NULL) return;
     if (x >= raster->config.width || y >= raster->config.height) return;

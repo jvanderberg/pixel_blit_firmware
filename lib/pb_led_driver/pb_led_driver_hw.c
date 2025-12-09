@@ -23,7 +23,7 @@
 // DMA Configuration
 // ============================================================================
 
-#define PB_DMA_CHANNEL 0
+#define PB_DMA_CHANNEL 8  // Use channel 8 to avoid conflict with SD card
 
 // ============================================================================
 // Hardware state (internal)
@@ -36,6 +36,9 @@ typedef struct {
 
     // Transfer size: pixels * 3 channels * 8 planes
     uint32_t transfer_words;
+
+    // Reset delay from config
+    uint16_t reset_us;
 
     // Synchronization
     struct semaphore reset_delay_sem;
@@ -70,8 +73,8 @@ static void __isr dma_complete_handler(void) {
         if (hw_state.reset_alarm_id) {
             cancel_alarm(hw_state.reset_alarm_id);
         }
-        // WS2811 requires ~80us reset, use 100us for safety
-        hw_state.reset_alarm_id = add_alarm_in_us(100, reset_delay_complete, NULL, true);
+        // WS2811/WS2812 reset delay from config (typically 200us)
+        hw_state.reset_alarm_id = add_alarm_in_us(hw_state.reset_us, reset_delay_complete, NULL, true);
     }
 }
 
@@ -89,12 +92,18 @@ int pb_hw_init(pb_driver_t* driver) {
         return -1;
     }
 
-    // Initialize semaphore (start with 1 so first show doesn't block)
-    sem_init(&hw_state.reset_delay_sem, 1, 1);
+    // Initialize semaphore (start with 0 - first show will wait for reset)
+    sem_init(&hw_state.reset_delay_sem, 0, 1);
     hw_state.reset_alarm_id = 0;
+
+    // Schedule initial reset delay so first frame waits for LEDs to be ready
+    hw_state.reset_alarm_id = add_alarm_in_us(300, reset_delay_complete, NULL, true);
 
     // Calculate transfer size: pixels * 3 channels * 8 bit-planes
     hw_state.transfer_words = config->max_pixel_length * 3 * 8;
+
+    // Store reset delay (use 200us minimum if not specified)
+    hw_state.reset_us = config->reset_us > 0 ? config->reset_us : 200;
 
     // Claim PIO and load program
     hw_state.pio = (config->pio_index == 0) ? pio0 : pio1;

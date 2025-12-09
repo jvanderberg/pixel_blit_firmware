@@ -26,9 +26,7 @@ static spi_t sd_spi = {
     .miso_gpio = 36,  // GPIO number (not pin number)
     .mosi_gpio = 39,
     .sck_gpio = 38,
-    .baud_rate = 100 * 1000, // 100 kHz (Required for init)
-    //.baud_rate = 12500 * 1000, // 12.5 MHz
-    //.baud_rate = 25 * 1000 * 1000, // 25 MHz
+    .baud_rate = 12500 * 1000, // 12.5 MHz (after init)
 };
 
 /* Configuration of the SD Card socket */

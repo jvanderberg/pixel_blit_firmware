@@ -83,6 +83,10 @@ pb_driver_t* pb_driver_init(const pb_driver_config_t* config) {
     driver->fps = 0;
 
 #ifndef PB_LED_DRIVER_TEST_BUILD
+    // Reset timing state for FPS tracking (static variables persist across driver cycles)
+    extern void pb_reset_timing_state(void);
+    pb_reset_timing_state();
+
     // Initialize hardware (PIO/DMA)
     if (pb_hw_init(driver) != 0) {
         return NULL;
@@ -96,6 +100,9 @@ pb_driver_t* pb_driver_init(const pb_driver_config_t* config) {
 void pb_driver_deinit(pb_driver_t* driver) {
     if (driver == NULL) return;
     if (driver != &driver_instance) return;  // Not our instance
+
+    // Clean up all rasters associated with this driver
+    pb_raster_destroy_all(driver);
 
 #ifndef PB_LED_DRIVER_TEST_BUILD
     // Deinitialize hardware
@@ -287,6 +294,13 @@ extern void pb_hw_show_wait(void);
 static uint64_t last_show_time = 0;
 static uint64_t fps_window_start = 0;
 static uint32_t fps_frame_count = 0;
+
+// Called from pb_driver_init to reset timing state for new driver instance
+void pb_reset_timing_state(void) {
+    last_show_time = 0;
+    fps_window_start = 0;
+    fps_frame_count = 0;
+}
 
 void pb_show(pb_driver_t* driver) {
     if (driver == NULL) return;

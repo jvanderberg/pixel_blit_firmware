@@ -21,10 +21,24 @@ typedef enum {
 } TestRunState;
 
 // SD Card State
+#define SD_MAX_FILES 16
+#define SD_FILENAME_LEN 13  // 8.3 + null
+
 typedef struct {
     bool mounted;
-    char message[64]; // Status or filename
+    bool needs_scan;               // True when entering view, false after scan
+    char status_msg[24];           // Status message (e.g., "Mount Failed")
+    uint8_t file_count;            // Number of .fseq files found
+    uint8_t scroll_index;          // Current scroll position
+    // NOTE: File list stored in static buffer (sd_file_list), not here
+
+    // Playback state
+    bool is_playing;
+    char current_file[SD_FILENAME_LEN];
 } SdCardState;
+
+// External static file list (defined in main.c)
+extern char sd_file_list[SD_MAX_FILES][SD_FILENAME_LEN];
 
 // Board address decode result
 typedef struct {
@@ -81,7 +95,15 @@ static inline AppState app_state_init(void) {
         .menu_selection = MENU_INFO,
         .in_detail_view = false,
         .board_address = {0},
-        .sd_card = { .mounted = false, .message = "Init..." },
+        .sd_card = {
+            .mounted = false,
+            .needs_scan = false,
+            .status_msg = "Not scanned",
+            .file_count = 0,
+            .scroll_index = 0,
+            .is_playing = false,
+            .current_file = "",
+        },
         .string_test = {.run_state = TEST_STOPPED},
         .toggle_test = {.run_state = TEST_STOPPED},
         .rainbow_test = {

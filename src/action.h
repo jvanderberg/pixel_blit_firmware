@@ -15,7 +15,9 @@ typedef enum {
 
     // Sensor events
     ACTION_BOARD_ADDRESS_UPDATED,
-    ACTION_SD_CARD_STATUS,
+    ACTION_SD_CARD_MOUNTED,
+    ACTION_SD_CARD_ERROR,
+    ACTION_SD_FILES_LOADED,
 
     // Animation events
     ACTION_RAINBOW_FRAME_COMPLETE,
@@ -31,11 +33,15 @@ typedef union {
         uint16_t margin;
     } board_address;
 
-    // For ACTION_SD_CARD_STATUS
+    // For ACTION_SD_CARD_ERROR
     struct {
-        bool mounted;
-        char message[64];
-    } sd_card;
+        char message[24];
+    } sd_error;
+
+    // For ACTION_SD_FILES_LOADED
+    struct {
+        uint8_t count;  // Files stored in sd_file_list static buffer
+    } sd_files;
 
     // For ACTION_RAINBOW_FRAME_COMPLETE
     struct {
@@ -93,19 +99,31 @@ static inline Action action_board_address_updated(uint32_t timestamp,
     };
 }
 
-static inline Action action_sd_card_status(uint32_t timestamp, bool mounted, const char* msg) {
-    Action a = {
-        .type = ACTION_SD_CARD_STATUS,
+static inline Action action_sd_card_mounted(uint32_t timestamp) {
+    return (Action){
+        .type = ACTION_SD_CARD_MOUNTED,
         .timestamp = timestamp,
-        .payload.sd_card.mounted = mounted,
     };
-    // Safe copy
-    for(int i=0; i<63; i++) {
-        a.payload.sd_card.message[i] = msg[i];
-        if(msg[i] == 0) break;
+}
+
+static inline Action action_sd_card_error(uint32_t timestamp, const char* msg) {
+    Action a = {
+        .type = ACTION_SD_CARD_ERROR,
+        .timestamp = timestamp,
+    };
+    for(int i=0; i<23 && msg[i]; i++) {
+        a.payload.sd_error.message[i] = msg[i];
     }
-    a.payload.sd_card.message[63] = 0;
+    a.payload.sd_error.message[23] = 0;
     return a;
+}
+
+static inline Action action_sd_files_loaded(uint32_t timestamp, uint8_t count) {
+    return (Action){
+        .type = ACTION_SD_FILES_LOADED,
+        .timestamp = timestamp,
+        .payload.sd_files.count = count,
+    };
 }
 
 static inline Action action_rainbow_frame_complete(uint32_t timestamp, uint16_t fps) {

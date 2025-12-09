@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <limits.h>
+#include <string.h>
 
 #include "pico/stdlib.h"
 #include "pico/time.h"
@@ -13,6 +14,9 @@
 #include "ff.h"
 #include "sd_card.h"
 #include "hw_config.h"
+
+// FSEQ Player
+#include "fseq_player.h"
 
 #include "app_state.h"
 #include "action.h"
@@ -47,6 +51,10 @@ static sh1106_t display;
 static string_test_t string_test_ctx;
 static toggle_test_t toggle_test_ctx;
 static rainbow_test_t rainbow_test_ctx;
+static fseq_player_t fseq_player_ctx;
+
+// Static file list buffer (declared extern in app_state.h)
+char sd_file_list[SD_MAX_FILES][SD_FILENAME_LEN];
 
 // Core1 rainbow test control (extern'd by side_effects.c)
 volatile bool rainbow_core1_running = false;
@@ -55,6 +63,13 @@ void core1_rainbow_entry(void) {
     while (rainbow_core1_running) {
         rainbow_test_task(&rainbow_test_ctx);
     }
+}
+
+// Core1 FSEQ playback control (extern'd by side_effects.c)
+volatile bool fseq_core1_running = false;
+
+void core1_fseq_entry(void) {
+    fseq_player_core1_entry();
 }
 
 // Button state
@@ -187,12 +202,16 @@ int main() {
     if (!rainbow_test_init(&rainbow_test_ctx, STRING_OUT_BASE_PIN)) {
         printf("Rainbow test init failed\n");
     }
+    if (!fseq_player_init(&fseq_player_ctx, STRING_OUT_BASE_PIN)) {
+        printf("FSEQ player init failed\n");
+    }
 
     // Setup hardware context
     hw_context.display = &display;
     hw_context.string_test = &string_test_ctx;
     hw_context.toggle_test = &toggle_test_ctx;
     hw_context.rainbow_test = &rainbow_test_ctx;
+    hw_context.fseq_player = &fseq_player_ctx;
 
     // Initialize application state
     current_state = app_state_init();
@@ -211,7 +230,6 @@ int main() {
     absolute_time_t last_tick_1s = get_absolute_time();
     absolute_time_t last_display_refresh = get_absolute_time();
     absolute_time_t last_board_addr_sample = get_absolute_time();
-    absolute_time_t last_sd_check = get_absolute_time();
 
     printf("Entering main loop\n");
 
@@ -229,35 +247,59 @@ int main() {
             dispatch(action_button_next(now_us));
         }
 
-        // SD Card Scan (only when in SD Menu)
-        if (current_state.in_detail_view && 
+        // SD Card Scan (only once when entering SD view)
+        if (current_state.in_detail_view &&
             current_state.menu_selection == MENU_SD_CARD &&
-            absolute_time_diff_us(last_sd_check, now) >= 1000000) {
-            
-            last_sd_check = now;
-            
+            current_state.sd_card.needs_scan) {
+
             sd_card_t *sd = sd_get_by_num(0);
+            printf("SD: Mounting...\n");
             FRESULT fr = f_mount(&sd->fatfs, sd->pcName, 1);
-            
+            printf("SD: Mount Result = %d\n", fr);
+
             if (fr != FR_OK) {
-                dispatch(action_sd_card_status(now_us, false, "Mount Failed"));
+                dispatch(action_sd_card_error(now_us, "Mount Failed"));
             } else {
+                dispatch(action_sd_card_mounted(now_us));
+                printf("SD: Reading directory...\n");
                 DIR dir;
                 FILINFO fno;
                 fr = f_opendir(&dir, "/");
                 if (fr == FR_OK) {
-                    // Read first file
-                    fr = f_readdir(&dir, &fno);
-                    if (fr == FR_OK && fno.fname[0]) {
-                        dispatch(action_sd_card_status(now_us, true, fno.fname));
-                    } else {
-                        dispatch(action_sd_card_status(now_us, true, "Empty Dir"));
+                    // Read up to SD_MAX_FILES .fseq files into static buffer
+                    uint8_t count = 0;
+
+                    while (count < SD_MAX_FILES) {
+                        fr = f_readdir(&dir, &fno);
+                        if (fr != FR_OK || fno.fname[0] == 0) break;
+
+                        // Check extension .fseq (case-insensitive)
+                        char *dot = strrchr(fno.fname, '.');
+                        if (dot) {
+                            if ((dot[1] == 'f' || dot[1] == 'F') &&
+                                (dot[2] == 's' || dot[2] == 'S') &&
+                                (dot[3] == 'e' || dot[3] == 'E') &&
+                                (dot[4] == 'q' || dot[4] == 'Q') &&
+                                dot[5] == 0) {
+
+                                // Copy filename to static buffer
+                                for (int i = 0; i < SD_FILENAME_LEN - 1 && fno.fname[i]; i++) {
+                                    sd_file_list[count][i] = fno.fname[i];
+                                    sd_file_list[count][i+1] = 0;
+                                }
+                                printf("SD: Found: %s\n", sd_file_list[count]);
+                                count++;
+                            }
+                        }
                     }
                     f_closedir(&dir);
+
+                    printf("SD: Total .fseq files: %d\n", count);
+                    dispatch(action_sd_files_loaded(now_us, count));
                 } else {
-                    dispatch(action_sd_card_status(now_us, true, "OpenDir Failed"));
+                    printf("SD: OpenDir failed: %d\n", fr);
+                    dispatch(action_sd_card_error(now_us, "OpenDir Failed"));
                 }
-                // f_unmount(sd->pcName); // Optional, keep mounted for now
             }
         }
 

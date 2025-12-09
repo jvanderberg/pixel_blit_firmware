@@ -9,6 +9,10 @@
 extern volatile bool rainbow_core1_running;
 extern void core1_rainbow_entry(void);
 
+// FSEQ playback Core1 control
+extern volatile bool fseq_core1_running;
+extern void core1_fseq_entry(void);
+
 // Check if test run state changed
 static bool string_test_changed(const AppState* old, const AppState* new) {
     return old->string_test.run_state != new->string_test.run_state;
@@ -24,6 +28,10 @@ static bool rainbow_test_changed(const AppState* old, const AppState* new) {
 
 static bool rainbow_string_changed(const AppState* old, const AppState* new) {
     return old->rainbow_test.current_string != new->rainbow_test.current_string;
+}
+
+static bool fseq_playback_changed(const AppState* old, const AppState* new) {
+    return old->sd_card.is_playing != new->sd_card.is_playing;
 }
 
 void side_effects_init(HardwareContext* hw) {
@@ -59,7 +67,9 @@ void side_effects_apply(const HardwareContext* hw,
             rainbow_core1_running = true;
             multicore_launch_core1(core1_rainbow_entry);
         } else {
+            // Signal Core 1 to stop and wait for it to exit gracefully
             rainbow_core1_running = false;
+            sleep_ms(20);  // Allow Core 1 to finish current frame and exit loop
             multicore_reset_core1();
             rainbow_test_stop(hw->rainbow_test);
         }
@@ -69,6 +79,25 @@ void side_effects_apply(const HardwareContext* hw,
     if (new_state->rainbow_test.run_state == TEST_RUNNING &&
         rainbow_string_changed(old_state, new_state)) {
         rainbow_test_next_string(hw->rainbow_test);
+    }
+
+    // Handle FSEQ playback state changes - runs on core1
+    if (fseq_playback_changed(old_state, new_state)) {
+        if (new_state->sd_card.is_playing) {
+            // Start playback
+            fseq_player_start(hw->fseq_player, new_state->sd_card.current_file);
+            fseq_core1_running = true;
+            multicore_launch_core1(core1_fseq_entry);
+        } else {
+            // Signal Core 1 to stop - let it exit gracefully to close file properly
+            fseq_core1_running = false;
+            // Wait for Core 1 to exit (it checks the flag each frame)
+            // At 60fps, frames are ~16ms, so 100ms is plenty
+            sleep_ms(100);
+            // Now safe to reset (Core 1 should have exited and closed file)
+            multicore_reset_core1();
+            fseq_player_stop(hw->fseq_player);
+        }
     }
 
     // Always render view on state change

@@ -216,6 +216,9 @@ pb_raster_t* pb_raster_get(pb_driver_t* driver, int raster_id);
 /** Destroy a raster by ID */
 void pb_raster_destroy(pb_driver_t* driver, int raster_id);
 
+/** Destroy all rasters associated with a driver (called on driver deinit) */
+void pb_raster_destroy_all(pb_driver_t* driver);
+
 /** Set pixel in raster (x, y coordinates) */
 void pb_raster_set_pixel(pb_raster_t* raster, uint16_t x, uint16_t y, pb_color_t color);
 

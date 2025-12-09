@@ -73,9 +73,9 @@ bool fseq_parser_push(fseq_parser_ctx_t* ctx, const uint8_t* data, uint32_t len)
 
         // If we have collected 3 bytes, we have a full pixel (R, G, B)
         if (ctx->temp_pixel_idx == 3) {
-            // 1. Form color (Assumes RGB order in file)
-            uint32_t color = (ctx->temp_pixel[0] << 16) | 
-                             (ctx->temp_pixel[1] << 8)  | 
+            // 1. Form color (Assumes RGB order in file - set xLights String Type to RGB)
+            uint32_t color = (ctx->temp_pixel[0] << 16) |
+                             (ctx->temp_pixel[1] << 8)  |
                              ctx->temp_pixel[2];
 
             // 2. Output using current coordinates

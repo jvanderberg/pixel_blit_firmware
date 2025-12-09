@@ -62,28 +62,57 @@ static void render_board_address_detail(sh1106_t* display, const AppState* state
 }
 
 static void render_sd_card_detail(sh1106_t* display, const AppState* state) {
+    char line[24];
     sh1106_clear(display);
-    sh1106_draw_string(display, 0, 0, "SD Card", false);
-    sh1106_draw_string(display, 0, 16, state->sd_card.mounted ? "MOUNTED" : "NO CARD", false);
-    
-    // Wrap message if long (basic render)
-    char msg[64];
-    strncpy(msg, state->sd_card.message, sizeof(msg));
-    msg[sizeof(msg)-1] = 0;
-    
-    // Show first 16 chars on one line, next on another
-    char line1[17] = {0};
-    char line2[17] = {0};
-    
-    strncpy(line1, msg, 16);
-    if (strlen(msg) > 16) {
-        strncpy(line2, msg + 16, 16);
+
+    // Show playback state
+    if (state->sd_card.is_playing) {
+        sh1106_draw_string(display, 0, 0, "PLAYING", true);
+        sh1106_draw_string(display, 0, 16, state->sd_card.current_file, false);
+        sh1106_draw_string(display, 0, 40, "Press any button", false);
+        sh1106_draw_string(display, 0, 48, "to stop", false);
+        sh1106_render(display);
+        return;
     }
-    
-    sh1106_draw_string(display, 0, 32, line1, false);
-    sh1106_draw_string(display, 0, 40, line2, false);
-    
-    sh1106_draw_string(display, 0, 56, "Next exits", false);
+
+    if (!state->sd_card.mounted) {
+        sh1106_draw_string(display, 0, 0, "SD Card", false);
+        sh1106_draw_string(display, 0, 16, "NOT MOUNTED", false);
+        sh1106_draw_string(display, 0, 32, state->sd_card.status_msg, false);
+        sh1106_draw_string(display, 0, 56, "Next: scroll", false);
+        sh1106_render(display);
+        return;
+    }
+
+    // Show file count
+    snprintf(line, sizeof(line), "Files: %d", state->sd_card.file_count);
+    sh1106_draw_string(display, 0, 0, line, false);
+
+    // Calculate visible window (5 items max)
+    int scroll_idx = state->sd_card.scroll_index;
+    int total_items = state->sd_card.file_count + 1; // +1 for [Main Menu]
+
+    // Keep selected item visible, preferably in middle
+    int start_idx = 0;
+    if (scroll_idx > 2) start_idx = scroll_idx - 2;
+    if (start_idx + 5 > total_items) start_idx = total_items - 5;
+    if (start_idx < 0) start_idx = 0;
+
+    for (int i = 0; i < 5; i++) {
+        int item_idx = start_idx + i;
+        if (item_idx >= total_items) break;
+
+        bool is_selected = (item_idx == scroll_idx);
+        int y = 10 + i * 9;
+
+        if (item_idx < state->sd_card.file_count) {
+            sh1106_draw_string(display, 0, y, sd_file_list[item_idx], is_selected);
+        } else {
+            sh1106_draw_string(display, 0, y, "[ Main Menu ]", is_selected);
+        }
+    }
+
+    sh1106_draw_string(display, 0, 56, "Sel:pick Nxt:scrl", false);
     sh1106_render(display);
 }
 

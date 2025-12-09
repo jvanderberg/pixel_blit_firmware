@@ -20,10 +20,11 @@
 .define public T3 4
 
 .wrap_target
+    pull block                  ; Wait for data here (pins stay LOW during wait)
     mov pins, !null     [T1-1]  ; All pins HIGH (start of bit) - 3 cycles
-    out pins, 32        [T2-1]  ; Output data bits (autopull refills OSR) - 3 cycles
+    out pins, 32        [T2-1]  ; Output data bits - 3 cycles
     mov pins, null      [T3-1]  ; All pins LOW (end of bit) - 4 cycles
-.wrap                           ; Total: 10 cycles per bit
+.wrap                           ; Total: 10 cycles per bit (pull is non-blocking when data ready)
 
 % c-sdk {
 #include "hardware/clocks.h"
@@ -44,19 +45,24 @@ static inline void ws2811_parallel_program_init(PIO pio, uint sm, uint offset,
     // Configure OUT pins for parallel data (32 pins starting at pin_base)
     sm_config_set_out_pins(&c, pin_base, pin_count);
 
-    // Shift right, autopull at 32 bits
-    sm_config_set_out_shift(&c, true, true, 32);
+    // Shift right, no autopull (we use explicit pull block)
+    sm_config_set_out_shift(&c, true, false, 32);
 
     // Join FIFOs for TX only (8 words deep)
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
     // Clock divider: freq * cycles_per_bit = actual_clock
-    int cycles_per_bit = ws2811_parallel_T1 + ws2811_parallel_T2 + ws2811_parallel_T3;
+    // +1 for the pull instruction at the start of each bit
+    int cycles_per_bit = 1 + ws2811_parallel_T1 + ws2811_parallel_T2 + ws2811_parallel_T3;
     float div = clock_get_hz(clk_sys) / (freq * cycles_per_bit);
     sm_config_set_clkdiv(&c, div);
 
     // Initialize state machine
     pio_sm_init(pio, sm, offset, &c);
+
+    // Force pins LOW before enabling - prevents spurious HIGH pulse while waiting for first data
+    pio_sm_exec(pio, sm, pio_encode_mov(pio_pins, pio_null));
+
     pio_sm_set_enabled(pio, sm, true);
 }
 
