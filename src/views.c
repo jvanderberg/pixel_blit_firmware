@@ -9,6 +9,7 @@ static const char* menu_labels[MENU_COUNT] = {
     "String Test",
     "Toggle Test",
     "Rainbow Test",
+    "Brightness",
     "Shutdown",
 };
 
@@ -152,6 +153,27 @@ static void render_rainbow_test_detail(sh1106_t* display, const AppState* state)
     sh1106_render(display);
 }
 
+static void render_brightness_detail(sh1106_t* display, const AppState* state) {
+    char line[24];
+    sh1106_clear(display);
+    sh1106_draw_string(display, 0, 0, "Brightness", false);
+
+    // Draw brightness level as number and bar
+    snprintf(line, sizeof(line), "Level: %u / 10", state->brightness_level);
+    sh1106_draw_string(display, 0, 16, line, false);
+
+    // Draw visual bar [=====     ]
+    char bar[14] = "[          ]";
+    for (int i = 0; i < state->brightness_level; i++) {
+        bar[1 + i] = '=';
+    }
+    sh1106_draw_string(display, 0, 28, bar, false);
+
+    sh1106_draw_string(display, 0, 44, "Select: cycle", false);
+    sh1106_draw_string(display, 0, 52, "IR +/-: adjust", false);
+    sh1106_render(display);
+}
+
 void views_render(sh1106_t* display, const AppState* state) {
     // When powered off, display is blank
     if (!state->is_powered_on) {
@@ -183,6 +205,9 @@ void views_render(sh1106_t* display, const AppState* state) {
             break;
         case MENU_RAINBOW_TEST:
             render_rainbow_test_detail(display, state);
+            break;
+        case MENU_BRIGHTNESS:
+            render_brightness_detail(display, state);
             break;
         default:
             render_main_menu(display, state);

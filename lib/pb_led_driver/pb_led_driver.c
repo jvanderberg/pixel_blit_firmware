@@ -5,6 +5,10 @@
 #include "pb_led_driver.h"
 #include <string.h>
 
+// Global brightness multiplier (0-255), default full brightness
+// Set via pb_set_global_brightness()
+static uint8_t global_brightness = 255;
+
 // ============================================================================
 // Internal driver structure
 // ============================================================================
@@ -127,6 +131,11 @@ void pb_set_pixel(pb_driver_t* driver, uint8_t board, uint8_t string,
     if (board >= driver->config.num_boards) return;
     if (string >= driver->config.num_strings) return;
     if (pixel >= driver->config.max_pixel_length) return;
+
+    // Apply global brightness scaling
+    if (global_brightness < 255) {
+        color = pb_color_scale(color, global_brightness);
+    }
 
     // Get back buffer for this board
     pb_value_bits_t* buffer = get_board_buffer(driver, board, driver->current_buffer);
@@ -382,6 +391,14 @@ uint16_t pb_get_fps(const pb_driver_t* driver) {
 uint32_t pb_get_frame_count(const pb_driver_t* driver) {
     if (driver == NULL) return 0;
     return driver->frame_count;
+}
+
+void pb_set_global_brightness(uint8_t brightness) {
+    global_brightness = brightness;
+}
+
+uint8_t pb_get_global_brightness(void) {
+    return global_brightness;
 }
 
 #endif // PB_LED_DRIVER_TEST_BUILD

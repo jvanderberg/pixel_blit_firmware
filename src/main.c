@@ -276,7 +276,12 @@ int main() {
                 case PLAY:
                     dispatch(action_fseq_next(now_us));
                     break;
-                // TODO: Add more IR code mappings (brightness, etc.)
+                case BRIGHTNESS_UP:
+                    dispatch(action_brightness_up(now_us));
+                    break;
+                case BRIGHTNESS_DN:
+                    dispatch(action_brightness_down(now_us));
+                    break;
             }
         }
 

@@ -11,6 +11,7 @@ typedef enum {
     MENU_STRING_TEST,
     MENU_TOGGLE_TEST,
     MENU_RAINBOW_TEST,
+    MENU_BRIGHTNESS,
     MENU_SHUTDOWN,
     MENU_COUNT
 } MenuEntry;
@@ -67,12 +68,20 @@ typedef struct {
     uint16_t fps;
 } RainbowTestState;
 
+// Brightness levels (1-10 map to hardware values)
+#define BRIGHTNESS_MIN 1
+#define BRIGHTNESS_MAX 10
+#define BRIGHTNESS_DEFAULT 10
+
 // Complete application state
 typedef struct {
     uint32_t version;  // Incremented on every state change
 
     // Power state
     bool is_powered_on;  // When false, display off, all output stopped
+
+    // Global brightness (1-10)
+    uint8_t brightness_level;
 
     // UI State
     MenuEntry menu_selection;
@@ -98,6 +107,7 @@ static inline AppState app_state_init(void) {
     AppState state = {
         .version = 0,
         .is_powered_on = true,
+        .brightness_level = BRIGHTNESS_DEFAULT,
         .menu_selection = MENU_INFO,
         .in_detail_view = false,
         .board_address = {0},

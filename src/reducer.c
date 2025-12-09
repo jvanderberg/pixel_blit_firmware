@@ -105,6 +105,13 @@ static AppState handle_select_detail(const AppState* state) {
             return new_state;
         }
 
+        case MENU_BRIGHTNESS: {
+            // Cycle brightness 1->2->...->10->1
+            AppState new_state = app_state_new_version(state);
+            new_state.brightness_level = (state->brightness_level % BRIGHTNESS_MAX) + 1;
+            return new_state;
+        }
+
         case MENU_INFO:
         case MENU_BOARD_ADDRESS:
         default: {
@@ -281,6 +288,26 @@ static AppState handle_fseq_next(const AppState* state) {
     return new_state;
 }
 
+// Handle brightness up
+static AppState handle_brightness_up(const AppState* state) {
+    if (state->brightness_level >= BRIGHTNESS_MAX) {
+        return *state;  // Already at max
+    }
+    AppState new_state = app_state_new_version(state);
+    new_state.brightness_level = state->brightness_level + 1;
+    return new_state;
+}
+
+// Handle brightness down
+static AppState handle_brightness_down(const AppState* state) {
+    if (state->brightness_level <= BRIGHTNESS_MIN) {
+        return *state;  // Already at min
+    }
+    AppState new_state = app_state_new_version(state);
+    new_state.brightness_level = state->brightness_level - 1;
+    return new_state;
+}
+
 // Main reducer function
 AppState reduce(const AppState* state, const Action* action) {
     // If powered off, only respond to buttons (wake up) or power toggle
@@ -327,6 +354,12 @@ AppState reduce(const AppState* state, const Action* action) {
 
         case ACTION_FSEQ_NEXT:
             return handle_fseq_next(state);
+
+        case ACTION_BRIGHTNESS_UP:
+            return handle_brightness_up(state);
+
+        case ACTION_BRIGHTNESS_DOWN:
+            return handle_brightness_down(state);
 
         case ACTION_NONE:
         default:

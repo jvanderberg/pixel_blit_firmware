@@ -27,6 +27,10 @@ typedef enum {
 
     // Playback events
     ACTION_FSEQ_NEXT,  // Skip to next file during playback
+
+    // Brightness events
+    ACTION_BRIGHTNESS_UP,
+    ACTION_BRIGHTNESS_DOWN,
 } ActionType;
 
 // Action payload union
@@ -152,6 +156,20 @@ static inline Action action_power_toggle(uint32_t timestamp) {
 static inline Action action_fseq_next(uint32_t timestamp) {
     return (Action){
         .type = ACTION_FSEQ_NEXT,
+        .timestamp = timestamp,
+    };
+}
+
+static inline Action action_brightness_up(uint32_t timestamp) {
+    return (Action){
+        .type = ACTION_BRIGHTNESS_UP,
+        .timestamp = timestamp,
+    };
+}
+
+static inline Action action_brightness_down(uint32_t timestamp) {
+    return (Action){
+        .type = ACTION_BRIGHTNESS_DOWN,
         .timestamp = timestamp,
     };
 }

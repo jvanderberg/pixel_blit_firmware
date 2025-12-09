@@ -175,6 +175,16 @@ uint16_t pb_get_fps(const pb_driver_t* driver);
 uint32_t pb_get_frame_count(const pb_driver_t* driver);
 
 // ============================================================================
+// Global brightness control
+// ============================================================================
+
+/** Set global brightness multiplier (0-255, applied to all pixels) */
+void pb_set_global_brightness(uint8_t brightness);
+
+/** Get current global brightness */
+uint8_t pb_get_global_brightness(void);
+
+// ============================================================================
 // Raster abstraction layer
 // ============================================================================
 

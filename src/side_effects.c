@@ -3,6 +3,7 @@
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "hardware/sync.h"  // For __dmb() memory barrier
+#include "pb_led_driver.h"
 
 #include <stdio.h>
 
@@ -44,6 +45,19 @@ static bool fseq_file_changed(const AppState* old, const AppState* new) {
 
 static bool power_state_changed(const AppState* old, const AppState* new) {
     return old->is_powered_on != new->is_powered_on;
+}
+
+static bool brightness_changed(const AppState* old, const AppState* new) {
+    return old->brightness_level != new->brightness_level;
+}
+
+// Convert brightness level (1-10) to hardware value (0-255)
+static uint8_t brightness_level_to_hw(uint8_t level) {
+    // Map 1-10 to roughly equal perceptual steps
+    // Level 1 = 25, Level 10 = 255
+    if (level < 1) level = 1;
+    if (level > 10) level = 10;
+    return (uint8_t)(level * 25 + (level > 1 ? 5 : 0));
 }
 
 // Stop all running Core1 tasks and tests
@@ -100,6 +114,12 @@ void side_effects_apply(const HardwareContext* hw,
     if (!new_state->is_powered_on) {
         views_render(hw->display, new_state);
         return;
+    }
+
+    // Handle brightness changes
+    if (brightness_changed(old_state, new_state)) {
+        uint8_t hw_brightness = brightness_level_to_hw(new_state->brightness_level);
+        pb_set_global_brightness(hw_brightness);
     }
 
     // Handle string test state changes
