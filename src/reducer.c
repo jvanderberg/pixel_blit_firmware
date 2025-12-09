@@ -1,5 +1,14 @@
 #include "reducer.h"
 
+// Helper: stop all tests and playback
+static AppState stop_all_output(AppState state) {
+    state.string_test.run_state = TEST_STOPPED;
+    state.toggle_test.run_state = TEST_STOPPED;
+    state.rainbow_test.run_state = TEST_STOPPED;
+    state.sd_card.is_playing = false;
+    return state;
+}
+
 // Helper: stop all tests except the specified one
 static AppState stop_other_tests(AppState state, MenuEntry keep_running) {
     if (keep_running != MENU_STRING_TEST) {
@@ -37,6 +46,12 @@ static AppState handle_select_menu(const AppState* state) {
         case MENU_RAINBOW_TEST:
             new_state.rainbow_test.run_state = TEST_RUNNING;
             new_state.rainbow_test.fps = 0;
+            break;
+        case MENU_SHUTDOWN:
+            // Shutdown: power off immediately (don't enter detail view)
+            new_state.in_detail_view = false;
+            new_state.is_powered_on = false;
+            new_state = stop_all_output(new_state);
             break;
         default:
             // INFO and BOARD_ADDRESS just show detail view
@@ -212,14 +227,47 @@ static AppState handle_rainbow_frame_complete(const AppState* state, const Actio
     return new_state;
 }
 
+// Handle power toggle (on/off)
+static AppState handle_power_toggle(const AppState* state) {
+    AppState new_state = app_state_new_version(state);
+    new_state.is_powered_on = !state->is_powered_on;
+
+    if (!new_state.is_powered_on) {
+        // Powering off: stop all output, reset to main menu
+        new_state = stop_all_output(new_state);
+        new_state.in_detail_view = false;
+        new_state.menu_selection = MENU_INFO;
+    }
+    // Powering on: just flip the flag, user sees main menu
+
+    return new_state;
+}
+
 // Main reducer function
 AppState reduce(const AppState* state, const Action* action) {
+    // If powered off, only respond to buttons (wake up) or power toggle
+    if (!state->is_powered_on) {
+        if (action->type == ACTION_BUTTON_SELECT ||
+            action->type == ACTION_BUTTON_NEXT ||
+            action->type == ACTION_POWER_TOGGLE) {
+            // Any of these wakes up
+            AppState new_state = app_state_new_version(state);
+            new_state.is_powered_on = true;
+            return new_state;
+        }
+        // Ignore other actions when powered off
+        return *state;
+    }
+
     switch (action->type) {
         case ACTION_BUTTON_SELECT:
             return handle_button_select(state);
 
         case ACTION_BUTTON_NEXT:
             return handle_button_next(state);
+
+        case ACTION_POWER_TOGGLE:
+            return handle_power_toggle(state);
 
         case ACTION_TICK_1S:
             return handle_tick_1s(state);

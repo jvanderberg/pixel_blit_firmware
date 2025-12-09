@@ -9,6 +9,7 @@ static const char* menu_labels[MENU_COUNT] = {
     "String Test",
     "Toggle Test",
     "Rainbow Test",
+    "Shutdown",
 };
 
 static void render_main_menu(sh1106_t* display, const AppState* state) {
@@ -152,6 +153,13 @@ static void render_rainbow_test_detail(sh1106_t* display, const AppState* state)
 }
 
 void views_render(sh1106_t* display, const AppState* state) {
+    // When powered off, display is blank
+    if (!state->is_powered_on) {
+        sh1106_clear(display);
+        sh1106_render(display);
+        return;
+    }
+
     if (!state->in_detail_view) {
         render_main_menu(display, state);
         return;

@@ -21,6 +21,9 @@ typedef enum {
 
     // Animation events
     ACTION_RAINBOW_FRAME_COMPLETE,
+
+    // Power events
+    ACTION_POWER_TOGGLE,
 } ActionType;
 
 // Action payload union
@@ -133,5 +136,12 @@ static inline Action action_rainbow_frame_complete(uint32_t timestamp, uint16_t 
         .payload.rainbow = {
             .fps = fps,
         },
+    };
+}
+
+static inline Action action_power_toggle(uint32_t timestamp) {
+    return (Action){
+        .type = ACTION_POWER_TOGGLE,
+        .timestamp = timestamp,
     };
 }

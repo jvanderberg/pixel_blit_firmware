@@ -237,7 +237,9 @@ void fseq_player_core1_entry(void) {
 
     while (true) {
         __dmb();  // Ensure we see latest flag value from Core0
-        if (!fseq_core1_running || ctx->stop_requested) break;
+        if (!fseq_core1_running || ctx->stop_requested) {
+            break;
+        }
 
         // Loop based on header frame count, not EOF
         if (frames_played >= header.frame_count) {
@@ -254,6 +256,12 @@ void fseq_player_core1_entry(void) {
             fseq_parser_reset(parser);
             frames_played = 0;
             continue;
+        }
+
+        // Check for stop request after potentially slow SD read
+        __dmb();
+        if (!fseq_core1_running || ctx->stop_requested) {
+            break;
         }
 
         // Push data to parser

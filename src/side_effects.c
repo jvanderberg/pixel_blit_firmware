@@ -35,6 +35,38 @@ static bool fseq_playback_changed(const AppState* old, const AppState* new) {
     return old->sd_card.is_playing != new->sd_card.is_playing;
 }
 
+static bool power_state_changed(const AppState* old, const AppState* new) {
+    return old->is_powered_on != new->is_powered_on;
+}
+
+// Stop all running Core1 tasks and tests
+static void stop_all_core1_tasks(const HardwareContext* hw) {
+    // Stop rainbow test if running on Core1
+    if (rainbow_core1_running) {
+        rainbow_core1_running = false;
+        __dmb();
+        sleep_ms(20);
+        multicore_reset_core1();
+        rainbow_test_stop(hw->rainbow_test);
+    }
+
+    // Stop FSEQ playback if running on Core1
+    if (fseq_core1_running) {
+        printf("POWER: Stopping FSEQ - setting flags\n");
+        // Set both flags so Core1 can exit at multiple check points
+        fseq_core1_running = false;
+        hw->fseq_player->stop_requested = true;
+        __dmb();
+        printf("POWER: Waiting 100ms for Core1\n");
+        sleep_ms(100);
+        printf("POWER: Resetting Core1\n");
+        multicore_reset_core1();
+        printf("POWER: Calling fseq_player_stop\n");
+        fseq_player_stop(hw->fseq_player);
+        printf("POWER: FSEQ stopped\n");
+    }
+}
+
 void side_effects_init(HardwareContext* hw) {
     // Hardware contexts are initialized in main
     (void)hw;
@@ -43,6 +75,26 @@ void side_effects_init(HardwareContext* hw) {
 void side_effects_apply(const HardwareContext* hw,
                         const AppState* old_state,
                         const AppState* new_state) {
+    // Handle power state changes
+    if (power_state_changed(old_state, new_state)) {
+        printf("POWER: State changed -> %s\n", new_state->is_powered_on ? "ON" : "OFF");
+        if (!new_state->is_powered_on) {
+            // Powering off: stop all output
+            printf("POWER: Stopping all Core1 tasks\n");
+            stop_all_core1_tasks(hw);
+            string_test_stop(hw->string_test);
+            toggle_test_stop(hw->toggle_test);
+            // View will show blank display
+        }
+        // Powering on: just render, state already reset to menu
+    }
+
+    // Skip all other side effects if powered off
+    if (!new_state->is_powered_on) {
+        views_render(hw->display, new_state);
+        return;
+    }
+
     // Handle string test state changes
     if (string_test_changed(old_state, new_state)) {
         if (new_state->string_test.run_state == TEST_RUNNING) {
@@ -117,6 +169,11 @@ void side_effects_apply(const HardwareContext* hw,
 }
 
 bool side_effects_tick(const HardwareContext* hw, const AppState* state) {
+    // Skip all tasks if powered off
+    if (!state->is_powered_on) {
+        return false;
+    }
+
     // Run string test task if active
     if (state->string_test.run_state == TEST_RUNNING) {
         string_test_task(hw->string_test);

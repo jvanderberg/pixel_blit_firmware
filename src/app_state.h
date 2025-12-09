@@ -11,6 +11,7 @@ typedef enum {
     MENU_STRING_TEST,
     MENU_TOGGLE_TEST,
     MENU_RAINBOW_TEST,
+    MENU_SHUTDOWN,
     MENU_COUNT
 } MenuEntry;
 
@@ -69,13 +70,16 @@ typedef struct {
 typedef struct {
     uint32_t version;  // Incremented on every state change
 
+    // Power state
+    bool is_powered_on;  // When false, display off, all output stopped
+
     // UI State
     MenuEntry menu_selection;
     bool in_detail_view;
 
     // Board info
     BoardAddressInfo board_address;
-    
+
     // SD Card
     SdCardState sd_card;
 
@@ -92,6 +96,7 @@ typedef struct {
 static inline AppState app_state_init(void) {
     AppState state = {
         .version = 0,
+        .is_powered_on = true,
         .menu_selection = MENU_INFO,
         .in_detail_view = false,
         .board_address = {0},

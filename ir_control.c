@@ -84,7 +84,7 @@ void ir_process_edge(void)
     }
     else if (bit_index >= 0)
     {
-        if (dt > 1700)
+        if (dt > 1500)
         {
             ir_data |= (1UL << bit_index);
         }

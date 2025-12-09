@@ -267,7 +267,12 @@ int main() {
         uint8_t ir_code;
         if (ir_get_next_command(&ir_code)) {
             printf("IR: Received code 0x%02X\n", ir_code);
-            // TODO: Map IR codes to actions
+            switch (ir_code) {
+                case POWER:
+                    dispatch(action_power_toggle(now_us));
+                    break;
+                // TODO: Add more IR code mappings
+            }
         }
 
         // SD Card Scan (only once when entering SD view)
