@@ -84,8 +84,9 @@ void side_effects_apply(const HardwareContext* hw,
     // Handle FSEQ playback state changes - runs on core1
     if (fseq_playback_changed(old_state, new_state)) {
         if (new_state->sd_card.is_playing) {
-            // Start playback
-            fseq_player_start(hw->fseq_player, new_state->sd_card.current_file);
+            // Start playback - look up filename from static buffer
+            const char* filename = sd_file_list[new_state->sd_card.playing_index];
+            fseq_player_start(hw->fseq_player, filename);
             fseq_core1_running = true;
             multicore_launch_core1(core1_fseq_entry);
         } else {

@@ -34,7 +34,7 @@ typedef struct {
 
     // Playback state
     bool is_playing;
-    char current_file[SD_FILENAME_LEN];
+    uint8_t playing_index;         // Index into sd_file_list (reducer stays pure)
 } SdCardState;
 
 // External static file list (defined in main.c)
@@ -102,7 +102,7 @@ static inline AppState app_state_init(void) {
             .file_count = 0,
             .scroll_index = 0,
             .is_playing = false,
-            .current_file = "",
+            .playing_index = 0,
         },
         .string_test = {.run_state = TEST_STOPPED},
         .toggle_test = {.run_state = TEST_STOPPED},

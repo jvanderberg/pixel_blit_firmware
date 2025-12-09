@@ -68,7 +68,8 @@ static void render_sd_card_detail(sh1106_t* display, const AppState* state) {
     // Show playback state
     if (state->sd_card.is_playing) {
         sh1106_draw_string(display, 0, 0, "PLAYING", true);
-        sh1106_draw_string(display, 0, 16, state->sd_card.current_file, false);
+        // Look up filename from static buffer using playing_index
+        sh1106_draw_string(display, 0, 16, sd_file_list[state->sd_card.playing_index], false);
         sh1106_draw_string(display, 0, 40, "Press any button", false);
         sh1106_draw_string(display, 0, 48, "to stop", false);
         sh1106_render(display);

@@ -83,12 +83,10 @@ static AppState handle_select_detail(const AppState* state) {
             }
 
             // SELECT on a file - start playback
+            // Reducer only sets index (pure) - side_effects looks up filename
             AppState new_state = app_state_new_version(state);
             new_state.sd_card.is_playing = true;
-            int idx = state->sd_card.scroll_index;
-            for (int i = 0; i < SD_FILENAME_LEN; i++) {
-                new_state.sd_card.current_file[i] = sd_file_list[idx][i];
-            }
+            new_state.sd_card.playing_index = state->sd_card.scroll_index;
             return new_state;
         }
 
