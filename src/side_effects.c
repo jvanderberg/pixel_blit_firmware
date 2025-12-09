@@ -63,9 +63,12 @@ void side_effects_apply(const HardwareContext* hw,
     // Handle rainbow test state changes - runs on core1
     if (rainbow_test_changed(old_state, new_state)) {
         if (new_state->rainbow_test.run_state == TEST_RUNNING) {
-            rainbow_test_start(hw->rainbow_test);
-            rainbow_core1_running = true;
-            multicore_launch_core1(core1_rainbow_entry);
+            // Guard: only launch if Core1 is not already running
+            if (!rainbow_core1_running && !fseq_core1_running) {
+                rainbow_test_start(hw->rainbow_test);
+                rainbow_core1_running = true;
+                multicore_launch_core1(core1_rainbow_entry);
+            }
         } else {
             // Signal Core 1 to stop and wait for it to exit gracefully
             rainbow_core1_running = false;
@@ -84,11 +87,14 @@ void side_effects_apply(const HardwareContext* hw,
     // Handle FSEQ playback state changes - runs on core1
     if (fseq_playback_changed(old_state, new_state)) {
         if (new_state->sd_card.is_playing) {
-            // Start playback - look up filename from static buffer
-            const char* filename = sd_file_list[new_state->sd_card.playing_index];
-            fseq_player_start(hw->fseq_player, filename);
-            fseq_core1_running = true;
-            multicore_launch_core1(core1_fseq_entry);
+            // Guard: only launch if Core1 is not already running
+            if (!fseq_core1_running && !rainbow_core1_running) {
+                // Start playback - look up filename from static buffer
+                const char* filename = sd_file_list[new_state->sd_card.playing_index];
+                fseq_player_start(hw->fseq_player, filename);
+                fseq_core1_running = true;
+                multicore_launch_core1(core1_fseq_entry);
+            }
         } else {
             // Signal Core 1 to stop - let it exit gracefully to close file properly
             fseq_core1_running = false;
