@@ -244,6 +244,12 @@ pb_value_bits_t* pb_driver_get_front_buffer(pb_driver_t* driver) {
     return get_board_buffer(driver, 0, front);
 }
 
+// Swap buffers - called by hw layer after semaphore acquired
+void pb_driver_swap_buffers(pb_driver_t* driver) {
+    if (driver == NULL) return;
+    driver->current_buffer ^= 1;
+}
+
 // ============================================================================
 // Show implementation
 // ============================================================================
@@ -305,10 +311,7 @@ void pb_reset_timing_state(void) {
 void pb_show(pb_driver_t* driver) {
     if (driver == NULL) return;
 
-    // Swap buffers: current back buffer becomes front buffer for DMA
-    driver->current_buffer ^= 1;
-
-    // Trigger DMA (blocking - always succeeds)
+    // Trigger DMA (blocking) - swap happens inside after semaphore acquired
     (void)pb_hw_show(driver, true);
 
     driver->frame_count++;
@@ -331,13 +334,9 @@ void pb_show(pb_driver_t* driver) {
 void pb_show_async(pb_driver_t* driver) {
     if (driver == NULL) return;
 
-    // Swap buffers BEFORE triggering DMA so front buffer is correct
-    driver->current_buffer ^= 1;
-
-    // Trigger DMA (non-blocking)
+    // Trigger DMA (non-blocking) - swap happens inside after semaphore acquired
     if (!pb_hw_show(driver, false)) {
-        // DMA busy - swap back to avoid writing to buffer being DMA'd
-        driver->current_buffer ^= 1;
+        // DMA busy - previous transfer still in progress
         return;
     }
 

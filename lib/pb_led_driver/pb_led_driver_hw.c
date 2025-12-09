@@ -49,8 +49,9 @@ typedef struct {
 
 static pb_hw_state_t hw_state = {0};
 
-// Forward declaration
+// Forward declarations
 extern pb_value_bits_t* pb_driver_get_front_buffer(pb_driver_t* driver);
+extern void pb_driver_swap_buffers(pb_driver_t* driver);
 
 // ============================================================================
 // Interrupt handlers
@@ -202,7 +203,11 @@ bool pb_hw_show(pb_driver_t* driver, bool blocking) {
         }
     }
 
-    // Get current front buffer (the one we'll DMA from)
+    // Swap buffers NOW - after semaphore acquired, previous DMA is done
+    // This ensures the old front buffer is safe to become the new back buffer
+    pb_driver_swap_buffers(driver);
+
+    // Get the new front buffer (the one we just finished writing to)
     pb_value_bits_t* buffer = pb_driver_get_front_buffer(driver);
     if (buffer == NULL) {
         sem_release(&hw_state.reset_delay_sem);
