@@ -10,6 +10,14 @@
 
 5. Add EEPROM/flash settings persistence. Save user settings (brightness level, last played file, etc.) to non-volatile storage so they survive power cycles. Consider using RP2350 flash or external EEPROM.
 
+6. Remove board address ADC resistor ladder logic. Instead, set board ID via config.csv or through a menu item in the user interface.
+
+7. Persist config.csv to EEPROM/flash. If config.csv is not present on SD card at boot, load the previously saved configuration from non-volatile storage.
+
+8. Add a "Board Config" menu to display the current board configuration (board ID, string count, per-string pixel counts and color orders).
+
+9. Apply per-string color order in pb_set_pixel. Currently color order is set per-driver, but each string may have a different color order in config.csv. This allows users to use pure RGB in xLights while PB handles the per-string color reordering.
+
 ## Future Improvements
 
 ### Consistent Error Handling Pattern
