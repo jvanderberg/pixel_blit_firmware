@@ -24,6 +24,9 @@ typedef enum {
 
     // Power events
     ACTION_POWER_TOGGLE,
+
+    // Playback events
+    ACTION_FSEQ_NEXT,  // Skip to next file during playback
 } ActionType;
 
 // Action payload union
@@ -142,6 +145,13 @@ static inline Action action_rainbow_frame_complete(uint32_t timestamp, uint16_t 
 static inline Action action_power_toggle(uint32_t timestamp) {
     return (Action){
         .type = ACTION_POWER_TOGGLE,
+        .timestamp = timestamp,
+    };
+}
+
+static inline Action action_fseq_next(uint32_t timestamp) {
+    return (Action){
+        .type = ACTION_FSEQ_NEXT,
         .timestamp = timestamp,
     };
 }

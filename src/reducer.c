@@ -212,6 +212,12 @@ static AppState handle_sd_files(const AppState* state, const Action* action) {
     if(new_state.sd_card.file_count == 0) {
         const char* msg = "No .fseq files";
         for(int i=0; msg[i] && i<23; i++) new_state.sd_card.status_msg[i] = msg[i];
+        new_state.sd_card.auto_play_pending = false;  // Can't auto-play with no files
+    } else if (state->sd_card.auto_play_pending) {
+        // Auto-play was requested via IR - start first file
+        new_state.sd_card.is_playing = true;
+        new_state.sd_card.playing_index = 0;
+        new_state.sd_card.auto_play_pending = false;
     }
     return new_state;
 }
@@ -239,6 +245,38 @@ static AppState handle_power_toggle(const AppState* state) {
         new_state.menu_selection = MENU_INFO;
     }
     // Powering on: just flip the flag, user sees main menu
+
+    return new_state;
+}
+
+// Handle skip to next FSEQ file (or start playback if not playing)
+static AppState handle_fseq_next(const AppState* state) {
+    AppState new_state = app_state_new_version(state);
+
+    if (state->sd_card.is_playing) {
+        // Currently playing: skip to next file
+        if (state->sd_card.file_count > 0) {
+            new_state.sd_card.playing_index = (state->sd_card.playing_index + 1) % state->sd_card.file_count;
+        }
+    } else {
+        // Not playing: trigger SD scan and start playback
+        // If files already loaded, start first file
+        if (state->sd_card.file_count > 0) {
+            new_state.sd_card.is_playing = true;
+            new_state.sd_card.playing_index = 0;
+            // Update menu state to show SD card view
+            new_state.menu_selection = MENU_SD_CARD;
+            new_state.in_detail_view = true;
+            new_state.sd_card.scroll_index = 0;
+        } else {
+            // Need to scan first - trigger scan by entering SD view
+            new_state.menu_selection = MENU_SD_CARD;
+            new_state.in_detail_view = true;
+            new_state.sd_card.needs_scan = true;
+            // Set flag to auto-play after scan completes
+            new_state.sd_card.auto_play_pending = true;
+        }
+    }
 
     return new_state;
 }
@@ -286,6 +324,9 @@ AppState reduce(const AppState* state, const Action* action) {
 
         case ACTION_RAINBOW_FRAME_COMPLETE:
             return handle_rainbow_frame_complete(state, action);
+
+        case ACTION_FSEQ_NEXT:
+            return handle_fseq_next(state);
 
         case ACTION_NONE:
         default:

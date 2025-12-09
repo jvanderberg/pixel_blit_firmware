@@ -36,6 +36,7 @@ typedef struct {
     // Playback state
     bool is_playing;
     uint8_t playing_index;         // Index into sd_file_list (reducer stays pure)
+    bool auto_play_pending;        // Start playback after SD scan completes
 } SdCardState;
 
 // External static file list (defined in main.c)

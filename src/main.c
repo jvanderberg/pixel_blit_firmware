@@ -137,7 +137,8 @@ static uint16_t sample_board_address_adc(void) {
 }
 
 // Combined GPIO ISR for buttons and IR
-static void gpio_isr(uint gpio, uint32_t events) {
+// Placed in RAM to avoid flash XIP latency
+static void __not_in_flash_func(gpio_isr)(uint gpio, uint32_t events) {
     uint64_t now = time_us_64();
 
     if (gpio == BTN_SELECT_PIN && (events & GPIO_IRQ_EDGE_FALL)) {
@@ -236,6 +237,9 @@ int main() {
     gpio_set_irq_enabled(BTN_NEXT_PIN, GPIO_IRQ_EDGE_FALL, true);
     gpio_set_irq_enabled(IR_PIN, GPIO_IRQ_EDGE_FALL, true);
 
+    // Give GPIO interrupts highest priority for reliable IR reception
+    irq_set_priority(IO_IRQ_BANK0, 0x00);
+
     // Render initial view
     views_render(&display, &current_state);
 
@@ -245,7 +249,6 @@ int main() {
     // Timing
     absolute_time_t last_tick_1s = get_absolute_time();
     absolute_time_t last_display_refresh = get_absolute_time();
-    absolute_time_t last_board_addr_sample = get_absolute_time();
 
     printf("Entering main loop\n");
 
@@ -266,12 +269,14 @@ int main() {
         // Handle IR remote commands
         uint8_t ir_code;
         if (ir_get_next_command(&ir_code)) {
-            printf("IR: Received code 0x%02X\n", ir_code);
             switch (ir_code) {
                 case POWER:
                     dispatch(action_power_toggle(now_us));
                     break;
-                // TODO: Add more IR code mappings
+                case PLAY:
+                    dispatch(action_fseq_next(now_us));
+                    break;
+                // TODO: Add more IR code mappings (brightness, etc.)
             }
         }
 
@@ -300,28 +305,7 @@ int main() {
         if (absolute_time_diff_us(last_tick_1s, now) >= TICK_1S_US) {
             last_tick_1s = now;
             dispatch(action_tick_1s(now_us));
-
-            // Log state periodically
-            printf("Menu=%d View=%s Uptime=%lu IR_edges=%lu\n",
-                   current_state.menu_selection,
-                   current_state.in_detail_view ? "Detail" : "Menu",
-                   (unsigned long)current_state.uptime_seconds,
-                   (unsigned long)ir_get_edge_count());
         }
-
-        // Sample board address periodically (every 100ms)
-        if (absolute_time_diff_us(last_board_addr_sample, now) >= 100000) {
-            last_board_addr_sample = now;
-
-            uint16_t adc_value = sample_board_address_adc();
-            uint8_t code;
-            uint16_t error, margin;
-            decode_board_address(adc_value, &code, &error, &margin);
-
-            dispatch(action_board_address_updated(now_us, adc_value, code, error, margin));
-        }
-
-        // Rainbow test runs on core1 - nothing to do here
 
         // Periodic FPS update for rainbow test display
         if (current_state.in_detail_view &&

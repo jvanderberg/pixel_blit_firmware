@@ -35,6 +35,13 @@ static bool fseq_playback_changed(const AppState* old, const AppState* new) {
     return old->sd_card.is_playing != new->sd_card.is_playing;
 }
 
+static bool fseq_file_changed(const AppState* old, const AppState* new) {
+    // Detect skip to next file while playing
+    return new->sd_card.is_playing &&
+           old->sd_card.is_playing &&
+           old->sd_card.playing_index != new->sd_card.playing_index;
+}
+
 static bool power_state_changed(const AppState* old, const AppState* new) {
     return old->is_powered_on != new->is_powered_on;
 }
@@ -162,6 +169,23 @@ void side_effects_apply(const HardwareContext* hw,
             multicore_reset_core1();
             fseq_player_stop(hw->fseq_player);
         }
+    }
+
+    // Handle skip to next file during playback
+    if (fseq_file_changed(old_state, new_state)) {
+        // Stop current playback
+        fseq_core1_running = false;
+        __dmb();
+        sleep_ms(100);
+        multicore_reset_core1();
+        fseq_player_stop(hw->fseq_player);
+
+        // Start new file
+        const char* filename = sd_file_list[new_state->sd_card.playing_index];
+        fseq_player_start(hw->fseq_player, filename);
+        fseq_core1_running = true;
+        __dmb();
+        multicore_launch_core1(core1_fseq_entry);
     }
 
     // Always render view on state change
