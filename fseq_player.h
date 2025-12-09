@@ -4,10 +4,10 @@
 #include <stdint.h>
 #include "pico/types.h"
 #include "pb_led_driver.h"
+#include "board_config.h"
 
-// Layout for test.fseq: 2 strings x 50 pixels
-#define FSEQ_PLAYER_NUM_STRINGS 2
-#define FSEQ_PLAYER_PIXELS_PER_STRING 50
+// Maximum supported layout (from board_config.h)
+#define FSEQ_PLAYER_MAX_STRINGS BOARD_CONFIG_MAX_STRINGS
 
 typedef struct {
     pb_driver_t *driver;

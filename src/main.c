@@ -25,6 +25,9 @@
 // SD Card Operations
 #include "sd_ops.h"
 
+// Board configuration
+#include "board_config.h"
+
 #include "app_state.h"
 #include "action.h"
 #include "reducer.h"
@@ -42,7 +45,7 @@
 
 #define BOARD_ADDR_ADC_GPIO 40
 #define BOARD_ADDR_ADC_CH 0
-#define BOARD_ADDR_SAMPLES 32
+#define BOARD_ADDR_SAMPLES 100
 
 #define STRING_OUT_BASE_PIN 0
 
@@ -88,11 +91,13 @@ static volatile bool select_pressed = false;
 static volatile bool next_pressed = false;
 
 // Board address decoding
+// Theoretical ADC values for each code (sorted high→low by voltage)
+// Code order: 0,8,4,C,2,A,6,E,1,9,5,D,3,B,7,F
 static const uint16_t level_codes[16] = {
-    4095, 3723, 3374, 3117,
-    2786, 2608, 2432, 2296,
-    2048, 1950, 1850, 1770,
-    1658, 1593, 1526, 1471
+    4095, 3723, 3374, 3117,  // 0, 8, 4, C
+    2786, 2608, 2432, 2296,  // 2, A, 6, E
+    2048, 1950, 1850, 1770,  // 1, 9, 5, D
+    1658, 1593, 1526, 1471   // 3, B, 7, F
 };
 
 static const uint8_t code_by_rank[16] = {
@@ -132,6 +137,7 @@ static uint16_t sample_board_address_adc(void) {
     adc_select_input(BOARD_ADDR_ADC_CH);
     for (int i = 0; i < BOARD_ADDR_SAMPLES; i++) {
         acc += adc_read();
+        sleep_us(100);
     }
     return (uint16_t)(acc / BOARD_ADDR_SAMPLES);
 }
@@ -204,6 +210,48 @@ int main() {
     adc_init();
     adc_gpio_init(BOARD_ADDR_ADC_GPIO);
 
+    // Read board ID and load configuration from SD card
+    // Delay for ADC settling after init
+    sleep_ms(100);
+    uint16_t adc_sample = sample_board_address_adc();
+    uint8_t board_id;
+    uint16_t adc_error, adc_margin;
+    decode_board_address(adc_sample, &board_id, &adc_error, &adc_margin);
+    printf("Board ID: %u (ADC: %u, err: %u, margin: %u)\n",
+           board_id, adc_sample, adc_error, adc_margin);
+
+    // Configure SD card library to use DMA_IRQ_1 BEFORE first SD access
+    // (IRQ_0 is used by pb_led_driver)
+    set_spi_dma_irq_channel(true, true);  // useChannel1=true, shared=true
+
+    board_config_load_result_t config_result = board_config_load_from_sd(board_id);
+    if (!config_result.success) {
+        printf("Config: %s - using defaults\n", config_result.error_msg);
+
+        // Show error on display and wait for button
+        if (display_ready) {
+            char line[24];
+            sh1106_clear(&display);
+            sh1106_draw_string(&display, 0, 0, "Config Error", false);
+            sh1106_draw_string(&display, 0, 16, config_result.error_msg, false);
+            snprintf(line, sizeof(line), "Board ID: %u", board_id);
+            sh1106_draw_string(&display, 0, 32, line, false);
+            sh1106_draw_string(&display, 0, 48, "Using defaults", false);
+            sh1106_draw_string(&display, 0, 56, "Press button...", false);
+            sh1106_render(&display);
+
+            // Wait for button press
+            while (gpio_get(BTN_SELECT_PIN) && gpio_get(BTN_NEXT_PIN)) {
+                tight_loop_contents();
+            }
+            // Debounce
+            sleep_ms(200);
+        }
+    } else {
+        printf("Config: Loaded %u strings, max %u pixels\n",
+               g_board_config.string_count, g_board_config.max_pixel_count);
+    }
+
     // Initialize test modules
     if (!string_test_init(&string_test_ctx, STRING_OUT_BASE_PIN)) {
         printf("String test init failed\n");
@@ -243,12 +291,10 @@ int main() {
     // Render initial view
     views_render(&display, &current_state);
 
-    // Configure SD card library to use DMA_IRQ_1 (IRQ_0 is used by pb_led_driver)
-    set_spi_dma_irq_channel(true, true);  // useChannel1=true, shared=true
-
     // Timing
     absolute_time_t last_tick_1s = get_absolute_time();
     absolute_time_t last_display_refresh = get_absolute_time();
+    absolute_time_t last_board_addr_sample = get_absolute_time();
 
     printf("Entering main loop\n");
 
@@ -310,6 +356,18 @@ int main() {
         if (absolute_time_diff_us(last_tick_1s, now) >= TICK_1S_US) {
             last_tick_1s = now;
             dispatch(action_tick_1s(now_us));
+        }
+
+        // Sample board address periodically (every 100ms)
+        if (absolute_time_diff_us(last_board_addr_sample, now) >= 100000) {
+            last_board_addr_sample = now;
+
+            uint16_t adc_value = sample_board_address_adc();
+            uint8_t code;
+            uint16_t error, margin;
+            decode_board_address(adc_value, &code, &error, &margin);
+
+            dispatch(action_board_address_updated(now_us, adc_value, code, error, margin));
         }
 
         // Periodic FPS update for rainbow test display

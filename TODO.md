@@ -6,22 +6,9 @@
 
 3. ~~Add a global brightness setting, defaulted to 255, which gets mixed in at the pb layer. The IR remote brightness buttons should increment and decrement this value in 10 discrete steps. Add a 'brightness' menu this allows you to cycle through 1-10 brightness.~~ ✅
 
-4. Add SD card configuration file (`config.csv`) for board/string layout. On startup, the board should:
-   - Sample the board address ADC to determine its board ID (0-15)
-   - Read `config.csv` from SD card root
-   - Parse rows to get per-string configuration for this board
-   - File format: each row is a string, every 32 rows is a board
-   - Each row specifies: pixel count, color order (RGB, GRB, BGR, RBG, GBR, BRG)
-   - Example:
-     ```
-     50,GRB
-     50,GRB
-     100,RGB
-     ...
-     ```
-   - Board 0 reads rows 0-31, Board 1 reads rows 32-63, etc.
-   - This replaces hardcoded string configurations
+4. ~~Add SD card configuration file (`config.csv`) for board/string layout.~~ ✅
 
+5. Add EEPROM/flash settings persistence. Save user settings (brightness level, last played file, etc.) to non-volatile storage so they survive power cycles. Consider using RP2350 flash or external EEPROM.
 
 ## Future Improvements
 

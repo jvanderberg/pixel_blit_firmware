@@ -1,4 +1,5 @@
 #include "rainbow_test.h"
+#include "board_config.h"
 #include "pico/stdlib.h"
 #include <string.h>
 #include <stdio.h>
@@ -9,9 +10,14 @@
 static uint g_rainbow_gpio_base = 0;
 
 // Create driver and raster on demand
+// Rainbow test always uses 32 strings x 50 pixels for hardware discovery
+// but uses color order from board_config for correct color display
 static bool create_driver(rainbow_test_t *ctx)
 {
     if (ctx->driver) return true;  // Already exists
+
+    // Use first configured string's color order (or GRB as fallback)
+    pb_color_order_t color_order = board_config_get_color_order(0);
 
     pb_driver_config_t config = {
         .board_id = 0,
@@ -20,7 +26,7 @@ static bool create_driver(rainbow_test_t *ctx)
         .num_strings = RAINBOW_TEST_NUM_STRINGS,
         .max_pixel_length = RAINBOW_TEST_PIXELS_PER_STRING,
         .frequency_hz = 800000,
-        .color_order = PB_COLOR_ORDER_BRG,
+        .color_order = color_order,
         .reset_us = 200,
         .pio_index = 1,
     };
@@ -54,7 +60,7 @@ static bool create_driver(rainbow_test_t *ctx)
     }
 
     ctx->raster = pb_raster_get(ctx->driver, ctx->raster_id);
-    printf("Rainbow: Driver created\n");
+    printf("Rainbow: Driver created (color order: %d)\n", color_order);
     return true;
 }
 

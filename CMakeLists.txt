@@ -68,6 +68,7 @@ add_executable(pixel_blit_firmware
         src/side_effects.c
         src/views.c
         src/sd_ops.c
+        src/board_config.c
         sh1106.c
         string_test.c
         toggle_test.c

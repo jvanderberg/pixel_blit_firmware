@@ -1,5 +1,6 @@
 #include "fseq_player.h"
 #include "fseq_parser.h"
+#include "board_config.h"
 #include "pico/stdlib.h"
 #include "hardware/sync.h"  // For __dmb() memory barrier
 #include "ff.h"
@@ -21,7 +22,9 @@ static bool g_file_open = false;
 // Pixel callback - called by fseq_parser for each pixel
 static void pixel_callback(void *user_data, uint8_t string, uint16_t pixel, uint32_t color) {
     fseq_player_t *ctx = (fseq_player_t *)user_data;
-    if (ctx && ctx->driver && string < FSEQ_PLAYER_NUM_STRINGS && pixel < FSEQ_PLAYER_PIXELS_PER_STRING) {
+    uint16_t string_pixel_count = board_config_get_pixel_count(string);
+    if (ctx && ctx->driver && string < FSEQ_PLAYER_MAX_STRINGS &&
+        string_pixel_count > 0 && pixel < string_pixel_count) {
         pb_set_pixel(ctx->driver, 0, string, pixel, color);
     }
 }
@@ -47,27 +50,49 @@ bool fseq_player_init(fseq_player_t *ctx, uint first_pin) {
     return true;
 }
 
-// Create driver with correct layout for playback
+// Create driver with correct layout for playback using board_config
 static bool create_driver(fseq_player_t *ctx) {
     if (ctx->driver) {
         return true;  // Already created
     }
 
+    // Use board config for layout
+    uint8_t num_strings = 0;
+    uint16_t max_pixels = 0;
+
+    // Count active strings and find max pixel count
+    for (int i = 0; i < BOARD_CONFIG_MAX_STRINGS; i++) {
+        uint16_t pixel_count = board_config_get_pixel_count(i);
+        if (pixel_count > 0) {
+            num_strings = i + 1;  // Track highest active string index + 1
+            if (pixel_count > max_pixels) {
+                max_pixels = pixel_count;
+            }
+        }
+    }
+
+    if (num_strings == 0 || max_pixels == 0) {
+        printf("FSEQ: No strings configured in board_config\n");
+        return false;
+    }
+
     pb_driver_config_t config = {
-        .board_id = 0,
+        .board_id = g_board_config.board_id,
         .num_boards = 1,
         .gpio_base = g_gpio_base,
-        .num_strings = FSEQ_PLAYER_NUM_STRINGS,
-        .max_pixel_length = FSEQ_PLAYER_PIXELS_PER_STRING,
+        .num_strings = num_strings,
+        .max_pixel_length = max_pixels,
         .frequency_hz = 800000,
         .color_order = PB_COLOR_ORDER_RGB,  // Pass-through: let xLights handle color order
         .reset_us = 200,
         .pio_index = 1,  // Use PIO1
     };
 
-    for (int i = 0; i < FSEQ_PLAYER_NUM_STRINGS; i++) {
-        config.strings[i].length = FSEQ_PLAYER_PIXELS_PER_STRING;
-        config.strings[i].enabled = true;
+    // Configure each string from board_config
+    for (int i = 0; i < num_strings; i++) {
+        uint16_t pixel_count = board_config_get_pixel_count(i);
+        config.strings[i].length = pixel_count;
+        config.strings[i].enabled = (pixel_count > 0);
     }
 
     ctx->driver = pb_driver_init(&config);
@@ -76,8 +101,8 @@ static bool create_driver(fseq_player_t *ctx) {
         return false;
     }
 
-    printf("FSEQ: Driver created (%d strings x %d pixels)\n",
-           FSEQ_PLAYER_NUM_STRINGS, FSEQ_PLAYER_PIXELS_PER_STRING);
+    printf("FSEQ: Driver created (%d strings, max %d pixels)\n",
+           num_strings, max_pixels);
     return true;
 }
 
@@ -176,14 +201,18 @@ void fseq_player_core1_entry(void) {
         return;
     }
 
-    // Setup parser layout
-    uint16_t string_lengths[FSEQ_PLAYER_NUM_STRINGS];
-    for (int i = 0; i < FSEQ_PLAYER_NUM_STRINGS; i++) {
-        string_lengths[i] = FSEQ_PLAYER_PIXELS_PER_STRING;
+    // Setup parser layout from board_config
+    uint16_t string_lengths[BOARD_CONFIG_MAX_STRINGS];
+    uint8_t num_strings = 0;
+    for (int i = 0; i < BOARD_CONFIG_MAX_STRINGS; i++) {
+        string_lengths[i] = board_config_get_pixel_count(i);
+        if (string_lengths[i] > 0) {
+            num_strings = i + 1;
+        }
     }
 
     fseq_layout_t layout = {
-        .num_strings = FSEQ_PLAYER_NUM_STRINGS,
+        .num_strings = num_strings,
         .string_lengths = string_lengths,
     };
 
