@@ -22,6 +22,9 @@
 // IR Remote Control
 #include "ir_control.h"
 
+// SD Card Operations
+#include "sd_ops.h"
+
 #include "app_state.h"
 #include "action.h"
 #include "reducer.h"
@@ -272,54 +275,19 @@ int main() {
             current_state.menu_selection == MENU_SD_CARD &&
             current_state.sd_card.needs_scan) {
 
-            sd_card_t *sd = sd_get_by_num(0);
-            printf("SD: Mounting...\n");
-            FRESULT fr = f_mount(&sd->fatfs, sd->pcName, 1);
-            printf("SD: Mount Result = %d\n", fr);
+            sd_ops_scan_result_t scan = sd_ops_scan_fseq_files();
 
-            if (fr != FR_OK) {
-                dispatch(action_sd_card_error(now_us, "Mount Failed"));
-            } else {
-                dispatch(action_sd_card_mounted(now_us));
-                printf("SD: Reading directory...\n");
-                DIR dir;
-                FILINFO fno;
-                fr = f_opendir(&dir, "/");
-                if (fr == FR_OK) {
-                    // Read up to SD_MAX_FILES .fseq files into static buffer
-                    uint8_t count = 0;
-
-                    while (count < SD_MAX_FILES) {
-                        fr = f_readdir(&dir, &fno);
-                        if (fr != FR_OK || fno.fname[0] == 0) break;
-
-                        // Check extension .fseq (case-insensitive)
-                        char *dot = strrchr(fno.fname, '.');
-                        if (dot) {
-                            if ((dot[1] == 'f' || dot[1] == 'F') &&
-                                (dot[2] == 's' || dot[2] == 'S') &&
-                                (dot[3] == 'e' || dot[3] == 'E') &&
-                                (dot[4] == 'q' || dot[4] == 'Q') &&
-                                dot[5] == 0) {
-
-                                // Copy filename to static buffer
-                                for (int i = 0; i < SD_FILENAME_LEN - 1 && fno.fname[i]; i++) {
-                                    sd_file_list[count][i] = fno.fname[i];
-                                    sd_file_list[count][i+1] = 0;
-                                }
-                                printf("SD: Found: %s\n", sd_file_list[count]);
-                                count++;
-                            }
-                        }
-                    }
-                    f_closedir(&dir);
-
-                    printf("SD: Total .fseq files: %d\n", count);
-                    dispatch(action_sd_files_loaded(now_us, count));
-                } else {
-                    printf("SD: OpenDir failed: %d\n", fr);
+            switch (scan.result) {
+                case SD_OPS_OK:
+                    dispatch(action_sd_card_mounted(now_us));
+                    dispatch(action_sd_files_loaded(now_us, scan.file_count));
+                    break;
+                case SD_OPS_MOUNT_FAILED:
+                    dispatch(action_sd_card_error(now_us, "Mount Failed"));
+                    break;
+                case SD_OPS_OPENDIR_FAILED:
                     dispatch(action_sd_card_error(now_us, "OpenDir Failed"));
-                }
+                    break;
             }
         }
 
