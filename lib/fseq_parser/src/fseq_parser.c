@@ -1,5 +1,4 @@
 #include "fseq_parser.h"
-#include <stdlib.h>
 #include <string.h>
 
 /**
@@ -10,32 +9,39 @@ struct fseq_parser_ctx {
     fseq_pixel_cb pixel_cb;     ///< Callback function
     fseq_layout_t layout;       ///< Hardware layout for mapping
     fseq_header_t header;       ///< Cached file header
-    
+
     // Streaming State
     uint32_t current_channel_index; ///< Current channel offset within the frame (0 to channel_count)
     uint8_t  current_string_idx;    ///< Current string being populated
     uint16_t current_pixel_idx;     ///< Current pixel index within the string
-    
+
     uint8_t  temp_pixel[3];         ///< Buffer for assembling split pixels (R, G, B)
     uint8_t  temp_pixel_idx;        ///< Number of bytes currently in temp_pixel (0, 1, 2)
     bool     frame_completed;       ///< Flag to indicate frame end was reached
 };
 
+// Static allocation - single instance (no heap)
+static struct fseq_parser_ctx parser_instance;
+static bool parser_in_use = false;
+
 fseq_parser_ctx_t* fseq_parser_init(void* user_data, fseq_pixel_cb pixel_cb, fseq_layout_t layout) {
     if (!pixel_cb) return NULL;
-    // ... (rest is same)
-    fseq_parser_ctx_t* ctx = malloc(sizeof(fseq_parser_ctx_t));
-    if (ctx) {
-        memset(ctx, 0, sizeof(fseq_parser_ctx_t));
-        ctx->user_data = user_data;
-        ctx->pixel_cb = pixel_cb;
-        ctx->layout = layout;
-    }
+    if (parser_in_use) return NULL;  // Only one instance allowed
+
+    fseq_parser_ctx_t* ctx = &parser_instance;
+    memset(ctx, 0, sizeof(fseq_parser_ctx_t));
+    ctx->user_data = user_data;
+    ctx->pixel_cb = pixel_cb;
+    ctx->layout = layout;
+
+    parser_in_use = true;
     return ctx;
 }
 
 void fseq_parser_deinit(fseq_parser_ctx_t* ctx) {
-    free(ctx);
+    if (ctx == &parser_instance) {
+        parser_in_use = false;
+    }
 }
 
 void fseq_parser_reset(fseq_parser_ctx_t* ctx) {
