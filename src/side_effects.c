@@ -5,8 +5,6 @@
 #include "hardware/sync.h"  // For __dmb() memory barrier
 #include "pb_led_driver.h"
 
-#include <stdio.h>
-
 // Core1 control (defined in main.c)
 extern volatile bool rainbow_core1_running;
 extern void core1_rainbow_entry(void);
@@ -73,18 +71,13 @@ static void stop_all_core1_tasks(const HardwareContext* hw) {
 
     // Stop FSEQ playback if running on Core1
     if (fseq_core1_running) {
-        printf("POWER: Stopping FSEQ - setting flags\n");
         // Set both flags so Core1 can exit at multiple check points
         fseq_core1_running = false;
         hw->fseq_player->stop_requested = true;
         __dmb();
-        printf("POWER: Waiting 100ms for Core1\n");
         sleep_ms(100);
-        printf("POWER: Resetting Core1\n");
         multicore_reset_core1();
-        printf("POWER: Calling fseq_player_stop\n");
         fseq_player_stop(hw->fseq_player);
-        printf("POWER: FSEQ stopped\n");
     }
 }
 
@@ -98,10 +91,8 @@ void side_effects_apply(const HardwareContext* hw,
                         const AppState* new_state) {
     // Handle power state changes
     if (power_state_changed(old_state, new_state)) {
-        printf("POWER: State changed -> %s\n", new_state->is_powered_on ? "ON" : "OFF");
         if (!new_state->is_powered_on) {
             // Powering off: stop all output
-            printf("POWER: Stopping all Core1 tasks\n");
             stop_all_core1_tasks(hw);
             string_test_stop(hw->string_test);
             toggle_test_stop(hw->toggle_test);

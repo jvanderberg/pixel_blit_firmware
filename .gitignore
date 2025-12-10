@@ -1,6 +1,7 @@
 build
 build_host
 build_test
+build_test_board_config
 cblinken
 .DS_Store
 rp2350datasheet

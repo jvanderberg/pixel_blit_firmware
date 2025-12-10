@@ -260,9 +260,13 @@ static AppState handle_power_toggle(const AppState* state) {
 static AppState handle_fseq_next(const AppState* state) {
     AppState new_state = app_state_new_version(state);
 
+    // Stop any running tests before starting FSEQ playback
+    new_state = stop_all_output(new_state);
+
     if (state->sd_card.is_playing) {
         // Currently playing: skip to next file
         if (state->sd_card.file_count > 0) {
+            new_state.sd_card.is_playing = true;  // Re-enable after stop_all_output
             new_state.sd_card.playing_index = (state->sd_card.playing_index + 1) % state->sd_card.file_count;
         }
     } else {
