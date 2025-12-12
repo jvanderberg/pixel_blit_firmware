@@ -13,7 +13,7 @@ typedef struct {
     pb_driver_t *driver;
     volatile bool running;
     volatile bool stop_requested;
-    char filename[13];  // 8.3 + null
+    char filename[32];  // Support long filenames
     uint16_t target_fps;
     uint16_t fps;
 } fseq_player_t;

@@ -1,4 +1,5 @@
 #include "reducer.h"
+#include "board_config.h"
 
 // Helper: stop all tests and playback
 static AppState stop_all_output(AppState state) {
@@ -112,7 +113,18 @@ static AppState handle_select_detail(const AppState* state) {
             return new_state;
         }
 
-        case MENU_INFO:
+        case MENU_INFO: {
+            // SELECT on [Exit] - exit detail view
+            if (state->info_view.scroll_index >= g_board_config.string_count) {
+                AppState new_state = app_state_new_version(state);
+                new_state.in_detail_view = false;
+                new_state.info_view.scroll_index = 0;  // Reset for next time
+                return new_state;
+            }
+            // SELECT on a string - no action, just scroll
+            return *state;
+        }
+
         case MENU_BOARD_ADDRESS:
         default: {
             // Exit detail view
@@ -135,6 +147,15 @@ static AppState handle_button_select(const AppState* state) {
 // Handle NEXT button
 static AppState handle_button_next(const AppState* state) {
     if (state->in_detail_view) {
+        // Special handling for Info view - scroll through string config
+        if (state->menu_selection == MENU_INFO) {
+            AppState new_state = app_state_new_version(state);
+            // +1 for [Exit] option at the end
+            uint8_t total_items = g_board_config.string_count + 1;
+            new_state.info_view.scroll_index = (state->info_view.scroll_index + 1) % total_items;
+            return new_state;
+        }
+
         // Special handling for SD Card
         if (state->menu_selection == MENU_SD_CARD) {
             // If playing, NEXT stops playback

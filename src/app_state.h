@@ -24,7 +24,7 @@ typedef enum {
 
 // SD Card State
 #define SD_MAX_FILES 16
-#define SD_FILENAME_LEN 13  // 8.3 + null
+#define SD_FILENAME_LEN 32  // Support long filenames
 
 typedef struct {
     bool mounted;
@@ -50,6 +50,11 @@ typedef struct {
     uint16_t error;
     uint16_t margin;
 } BoardAddressInfo;
+
+// Info view state
+typedef struct {
+    uint8_t scroll_index;          // Current scroll position in string config list
+} InfoViewState;
 
 // String test state
 typedef struct {
@@ -90,6 +95,9 @@ typedef struct {
     // Board info
     BoardAddressInfo board_address;
 
+    // Info view
+    InfoViewState info_view;
+
     // SD Card
     SdCardState sd_card;
 
@@ -111,6 +119,7 @@ static inline AppState app_state_init(void) {
         .menu_selection = MENU_INFO,
         .in_detail_view = false,
         .board_address = {0},
+        .info_view = {.scroll_index = 0},
         .sd_card = {
             .mounted = false,
             .needs_scan = false,

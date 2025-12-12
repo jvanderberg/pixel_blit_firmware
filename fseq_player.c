@@ -177,7 +177,7 @@ void fseq_player_core1_entry(void) {
     printf("FSEQ Core1: Starting %s\n", ctx->filename);
 
     // Build full path
-    char path[32];
+    char path[40];
     snprintf(path, sizeof(path), "/%s", ctx->filename);
 
     // Open file

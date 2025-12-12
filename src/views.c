@@ -1,6 +1,19 @@
 #include "views.h"
+#include "board_config.h"
 #include <stdio.h>
 #include <string.h>
+
+static const char* color_order_name(pb_color_order_t order) {
+    switch (order) {
+        case PB_COLOR_ORDER_RGB: return "RGB";
+        case PB_COLOR_ORDER_GRB: return "GRB";
+        case PB_COLOR_ORDER_BGR: return "BGR";
+        case PB_COLOR_ORDER_RBG: return "RBG";
+        case PB_COLOR_ORDER_GBR: return "GBR";
+        case PB_COLOR_ORDER_BRG: return "BRG";
+        default: return "???";
+    }
+}
 
 static const char* menu_labels[MENU_COUNT] = {
     "Info",
@@ -39,13 +52,41 @@ static void render_main_menu(sh1106_t* display, const AppState* state) {
 static void render_info_detail(sh1106_t* display, const AppState* state) {
     char line[24];
     sh1106_clear(display);
-    sh1106_draw_string(display, 0, 0, "PixelBlit", false);
-    sh1106_draw_string(display, 0, 8, "pixelblit_v4", false);
-    snprintf(line, sizeof(line), "Uptime: %lus", (unsigned long)state->uptime_seconds);
-    sh1106_draw_string(display, 0, 24, line, false);
-    snprintf(line, sizeof(line), "Board ADC: %u", state->board_address.adc_value);
-    sh1106_draw_string(display, 0, 32, line, false);
-    sh1106_draw_string(display, 0, 48, "Select exits", false);
+
+    // Header with string count
+    snprintf(line, sizeof(line), "Strings: %u", g_board_config.string_count);
+    sh1106_draw_string(display, 0, 0, line, false);
+
+    // Calculate visible window (5 items max)
+    int scroll_idx = state->info_view.scroll_index;
+    int total_items = g_board_config.string_count + 1; // +1 for [Exit]
+
+    // Keep selected item visible
+    int start_idx = 0;
+    if (scroll_idx > 2) start_idx = scroll_idx - 2;
+    if (start_idx + 5 > total_items) start_idx = total_items - 5;
+    if (start_idx < 0) start_idx = 0;
+
+    for (int i = 0; i < 5; i++) {
+        int item_idx = start_idx + i;
+        if (item_idx >= total_items) break;
+
+        bool is_selected = (item_idx == scroll_idx);
+        int y = 10 + i * 9;
+
+        if (item_idx < g_board_config.string_count) {
+            // Show string config: "S00: 84px RGB"
+            snprintf(line, sizeof(line), "S%02d: %3upx %s",
+                     item_idx,
+                     g_board_config.strings[item_idx].pixel_count,
+                     color_order_name(g_board_config.strings[item_idx].color_order));
+            sh1106_draw_string(display, 0, y, line, is_selected);
+        } else {
+            sh1106_draw_string(display, 0, y, "[ Exit ]", is_selected);
+        }
+    }
+
+    sh1106_draw_string(display, 0, 56, "Nxt:scrl Sel:exit", false);
     sh1106_render(display);
 }
 
