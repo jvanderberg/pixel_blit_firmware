@@ -19,6 +19,9 @@
 // FSEQ Player
 #include "fseq_player.h"
 
+// String Length Test
+#include "string_length_test.h"
+
 // IR Remote Control
 #include "ir_control.h"
 
@@ -61,6 +64,7 @@ static sh1106_t display;
 static string_test_t string_test_ctx;
 static toggle_test_t toggle_test_ctx;
 static rainbow_test_t rainbow_test_ctx;
+static string_length_test_t string_length_test_ctx;
 static fseq_player_t fseq_player_ctx;
 
 // Static file list buffer (declared extern in app_state.h)
@@ -262,6 +266,9 @@ int main() {
     if (!rainbow_test_init(&rainbow_test_ctx, STRING_OUT_BASE_PIN)) {
         printf("Rainbow test init failed\n");
     }
+    if (!string_length_test_init(&string_length_test_ctx, STRING_OUT_BASE_PIN)) {
+        printf("String length test init failed\n");
+    }
     if (!fseq_player_init(&fseq_player_ctx, STRING_OUT_BASE_PIN)) {
         printf("FSEQ player init failed\n");
     }
@@ -271,6 +278,7 @@ int main() {
     hw_context.string_test = &string_test_ctx;
     hw_context.toggle_test = &toggle_test_ctx;
     hw_context.rainbow_test = &rainbow_test_ctx;
+    hw_context.string_length_test = &string_length_test_ctx;
     hw_context.fseq_player = &fseq_player_ctx;
 
     // Initialize application state

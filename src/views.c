@@ -22,6 +22,7 @@ static const char* menu_labels[MENU_COUNT] = {
     "String Test",
     "Toggle Test",
     "Rainbow Test",
+    "String Length",
     "Brightness",
     "Shutdown",
 };
@@ -194,6 +195,30 @@ static void render_rainbow_test_detail(sh1106_t* display, const AppState* state)
     sh1106_render(display);
 }
 
+static void render_string_length_detail(sh1106_t* display, const AppState* state) {
+    char line[24];
+    sh1106_clear(display);
+    sh1106_draw_string(display, 0, 0, "String Length", false);
+
+    // Show current string and pixel position
+    snprintf(line, sizeof(line), "String: %u", state->string_length.current_string);
+    sh1106_draw_string(display, 0, 12, line, false);
+
+    snprintf(line, sizeof(line), "Pixel: %u", state->string_length.current_pixel);
+    sh1106_draw_string(display, 0, 22, line, true);  // Highlight current pixel
+
+    // Show previously recorded length for this string (if any)
+    uint16_t recorded = state->string_length.lengths[state->string_length.current_string];
+    if (recorded > 0) {
+        snprintf(line, sizeof(line), "Saved: %u", recorded);
+        sh1106_draw_string(display, 0, 34, line, false);
+    }
+
+    sh1106_draw_string(display, 0, 48, "Nxt:+1 Sel:save", false);
+    sh1106_draw_string(display, 0, 56, "& next string", false);
+    sh1106_render(display);
+}
+
 static void render_brightness_detail(sh1106_t* display, const AppState* state) {
     char line[24];
     sh1106_clear(display);
@@ -246,6 +271,9 @@ void views_render(sh1106_t* display, const AppState* state) {
             break;
         case MENU_RAINBOW_TEST:
             render_rainbow_test_detail(display, state);
+            break;
+        case MENU_STRING_LENGTH:
+            render_string_length_detail(display, state);
             break;
         case MENU_BRIGHTNESS:
             render_brightness_detail(display, state);

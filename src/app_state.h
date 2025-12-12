@@ -11,6 +11,7 @@ typedef enum {
     MENU_STRING_TEST,
     MENU_TOGGLE_TEST,
     MENU_RAINBOW_TEST,
+    MENU_STRING_LENGTH,
     MENU_BRIGHTNESS,
     MENU_SHUTDOWN,
     MENU_COUNT
@@ -73,6 +74,17 @@ typedef struct {
     uint16_t fps;
 } RainbowTestState;
 
+// String length tool state
+#define STRING_LENGTH_MAX_PIXELS 256  // Must match PB_MAX_PIXELS
+#define STRING_LENGTH_NUM_STRINGS 32
+
+typedef struct {
+    TestRunState run_state;
+    uint8_t current_string;        // 0-31
+    uint16_t current_pixel;        // Current pixel position being tested
+    uint16_t lengths[STRING_LENGTH_NUM_STRINGS];  // Recorded lengths
+} StringLengthState;
+
 // Brightness levels (1-10 map to hardware values)
 #define BRIGHTNESS_MIN 1
 #define BRIGHTNESS_MAX 10
@@ -105,6 +117,7 @@ typedef struct {
     StringTestState string_test;
     ToggleTestState toggle_test;
     RainbowTestState rainbow_test;
+    StringLengthState string_length;
 
     // System
     uint32_t uptime_seconds;
@@ -135,6 +148,12 @@ static inline AppState app_state_init(void) {
             .run_state = TEST_STOPPED,
             .current_string = 0,
             .fps = 0,
+        },
+        .string_length = {
+            .run_state = TEST_STOPPED,
+            .current_string = 0,
+            .current_pixel = 0,
+            .lengths = {0},
         },
         .uptime_seconds = 0,
     };

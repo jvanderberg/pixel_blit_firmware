@@ -73,6 +73,7 @@ add_executable(pixel_blit_firmware
         string_test.c
         toggle_test.c
         rainbow_test.c
+        string_length_test.c
         fseq_player.c
         ir_control.c
         lib/sd_card/hw_config.c

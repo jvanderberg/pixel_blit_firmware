@@ -30,6 +30,15 @@ static bool rainbow_string_changed(const AppState* old, const AppState* new) {
     return old->rainbow_test.current_string != new->rainbow_test.current_string;
 }
 
+static bool string_length_test_changed(const AppState* old, const AppState* new) {
+    return old->string_length.run_state != new->string_length.run_state;
+}
+
+static bool string_length_position_changed(const AppState* old, const AppState* new) {
+    return old->string_length.current_string != new->string_length.current_string ||
+           old->string_length.current_pixel != new->string_length.current_pixel;
+}
+
 static bool fseq_playback_changed(const AppState* old, const AppState* new) {
     return old->sd_card.is_playing != new->sd_card.is_playing;
 }
@@ -96,6 +105,7 @@ void side_effects_apply(const HardwareContext* hw,
             stop_all_core1_tasks(hw);
             string_test_stop(hw->string_test);
             toggle_test_stop(hw->toggle_test);
+            string_length_test_stop(hw->string_length_test);
             // View will show blank display
         }
         // Powering on: just render, state already reset to menu
@@ -155,6 +165,23 @@ void side_effects_apply(const HardwareContext* hw,
     if (new_state->rainbow_test.run_state == TEST_RUNNING &&
         rainbow_string_changed(old_state, new_state)) {
         rainbow_test_next_string(hw->rainbow_test);
+    }
+
+    // Handle string length test state changes
+    if (string_length_test_changed(old_state, new_state)) {
+        if (new_state->string_length.run_state == TEST_RUNNING) {
+            string_length_test_start(hw->string_length_test);
+        } else {
+            string_length_test_stop(hw->string_length_test);
+        }
+    }
+
+    // Handle string length position changes (while running)
+    if (new_state->string_length.run_state == TEST_RUNNING &&
+        string_length_position_changed(old_state, new_state)) {
+        string_length_test_update(hw->string_length_test,
+                                  new_state->string_length.current_string,
+                                  new_state->string_length.current_pixel);
     }
 
     // Handle FSEQ playback state changes - runs on core1

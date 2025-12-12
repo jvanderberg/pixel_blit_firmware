@@ -6,6 +6,7 @@ static AppState stop_all_output(AppState state) {
     state.string_test.run_state = TEST_STOPPED;
     state.toggle_test.run_state = TEST_STOPPED;
     state.rainbow_test.run_state = TEST_STOPPED;
+    state.string_length.run_state = TEST_STOPPED;
     state.sd_card.is_playing = false;
     return state;
 }
@@ -20,6 +21,9 @@ static AppState stop_other_tests(AppState state, MenuEntry keep_running) {
     }
     if (keep_running != MENU_RAINBOW_TEST) {
         state.rainbow_test.run_state = TEST_STOPPED;
+    }
+    if (keep_running != MENU_STRING_LENGTH) {
+        state.string_length.run_state = TEST_STOPPED;
     }
     return state;
 }
@@ -47,6 +51,12 @@ static AppState handle_select_menu(const AppState* state) {
         case MENU_RAINBOW_TEST:
             new_state.rainbow_test.run_state = TEST_RUNNING;
             new_state.rainbow_test.fps = 0;
+            break;
+        case MENU_STRING_LENGTH:
+            new_state.string_length.run_state = TEST_RUNNING;
+            new_state.string_length.current_string = 0;
+            new_state.string_length.current_pixel = 0;
+            // Don't reset lengths array - keep previous measurements
             break;
         case MENU_SHUTDOWN:
             // Shutdown: power off immediately (don't enter detail view)
@@ -125,6 +135,25 @@ static AppState handle_select_detail(const AppState* state) {
             return *state;
         }
 
+        case MENU_STRING_LENGTH: {
+            // SELECT saves current length and advances to next string
+            AppState new_state = app_state_new_version(state);
+            new_state.string_length.lengths[state->string_length.current_string] =
+                state->string_length.current_pixel;
+
+            // Advance to next string, or exit if done with all 32
+            if (state->string_length.current_string >= STRING_LENGTH_NUM_STRINGS - 1) {
+                // Done with all strings - exit
+                new_state.in_detail_view = false;
+                new_state.string_length.run_state = TEST_STOPPED;
+            } else {
+                // Move to next string
+                new_state.string_length.current_string = state->string_length.current_string + 1;
+                new_state.string_length.current_pixel = 0;
+            }
+            return new_state;
+        }
+
         case MENU_BOARD_ADDRESS:
         default: {
             // Exit detail view
@@ -171,12 +200,22 @@ static AppState handle_button_next(const AppState* state) {
             return new_state;
         }
 
+        // Special handling for String Length tool
+        if (state->menu_selection == MENU_STRING_LENGTH) {
+            AppState new_state = app_state_new_version(state);
+            // Increment pixel position, wrap at max
+            new_state.string_length.current_pixel =
+                (state->string_length.current_pixel + 1) % (STRING_LENGTH_MAX_PIXELS + 1);
+            return new_state;
+        }
+
         // Default: Exit detail view and stop any running tests
         AppState new_state = app_state_new_version(state);
         new_state.in_detail_view = false;
         new_state.string_test.run_state = TEST_STOPPED;
         new_state.toggle_test.run_state = TEST_STOPPED;
         new_state.rainbow_test.run_state = TEST_STOPPED;
+        new_state.string_length.run_state = TEST_STOPPED;
         return new_state;
     } else {
         // Navigate to next menu item
