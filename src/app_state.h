@@ -75,7 +75,7 @@ typedef struct {
 } RainbowTestState;
 
 // String length tool state
-#define STRING_LENGTH_MAX_PIXELS 256  // Must match PB_MAX_PIXELS
+#define STRING_LENGTH_MAX_PIXELS 512  // Must match PB_MAX_PIXELS
 #define STRING_LENGTH_NUM_STRINGS 32
 
 typedef struct {

@@ -358,3 +358,137 @@ To minimize runtime overhead, we will use a **"One File Per Board"** strategy (o
 
 This makes the firmware "dumb" and efficient. It simply streams bytes from disk to GPIOs.
 
+## Future: PSRAM Streaming for Large Displays
+
+Currently, bit-plane buffers reside entirely in internal SRAM. This fundamentally limits total display size:
+
+**The problem:**
+- Each pixel position (across all 32 strings) requires 96 bytes in bit-plane format
+- Double-buffered 512-position display = 96 KB
+- RP2350 has 520 KB SRAM total, but firmware needs some too
+
+**Real-world constraints:**
+- **Multi-board displays:** 4 boards × 32 strings × 500 pixels = 64,000 pixels. Main board must buffer all boards' data before LVDS transmission.
+- **Sparse configurations:** A display with a few 500-pixel strings but mostly short ones still needs buffers sized for the longest string, wasting SRAM.
+- **Large installations:** 100k+ pixel displays are common in professional lighting. Current architecture cannot support these.
+
+The RP2350 supports external QSPI PSRAM (up to 16 MB), which could hold entire multi-board frame buffers and stream them to the PIO/LVDS during output.
+
+### Bandwidth Analysis
+
+**LED output timing (per board):**
+- WS2812 bit rate: 800 kHz (1.25 µs/bit)
+- 24 bits/pixel = 30 µs per pixel position
+- 512 positions = 15.36 ms frame time (~65 fps max)
+
+**Data rate required per board:**
+- 96 bytes/position × 512 positions × 65 fps = **3.2 MB/s sustained**
+
+**Multi-board scenario (4 boards, main board streams all):**
+- 4 × 3.2 MB/s = **12.8 MB/s** (still well within PSRAM capability)
+
+**PSRAM capability:**
+- QSPI PSRAM at 133 MHz in QPI mode: 50+ MB/s sequential read
+- **Conclusion: Bandwidth is sufficient** even for 4-board displays at full frame rate.
+
+### RP2350 XIP/QMI Architecture
+
+The RP2350 makes this straightforward via its XIP (Execute-In-Place) subsystem:
+
+**Memory-mapped PSRAM:**
+- QMI supports 2 QSPI chip selects (CS0 = flash, CS1 = PSRAM)
+- PSRAM appears directly in XIP address space (e.g., `0x11000000`)
+- DMA can read directly from PSRAM addresses
+- 16 KB XIP cache provides automatic caching with 8-byte lines
+
+**Address aliases:**
+| Address | Function |
+|---------|----------|
+| `0x10...` | Cached XIP access |
+| `0x14...` | Uncached, no allocation |
+| `0x1C...` | Uncached, no translation |
+
+### Proposed Architecture: Static PSRAM Allocation
+
+```
+┌─────────────────┐      ┌─────────────┐      ┌──────────┐
+│ PSRAM Buffer    │ DMA  │ PIO TX FIFO │ PIO  │ 32 GPIOs │
+│ (memory-mapped) │─────►│             │─────►│          │
+│ @ 0x11000000    │      │             │      │          │
+└─────────────────┘      └─────────────┘      └──────────┘
+        ▲
+        │ XIP Cache (16KB)
+        │ auto-caches recent reads
+```
+
+**Key insight:** No ring buffer needed. DMA reads directly from PSRAM via XIP. The cache handles burst efficiency automatically.
+
+### Static Buffer Allocation
+
+Use linker script to place buffers in PSRAM:
+
+```c
+// In linker script (.ld):
+MEMORY {
+    FLASH(rx)  : ORIGIN = 0x10000000, LENGTH = 4M
+    PSRAM(rwx) : ORIGIN = 0x11000000, LENGTH = 8M
+    RAM(rwx)   : ORIGIN = 0x20000000, LENGTH = 520K
+}
+
+SECTIONS {
+    .psram_data : {
+        *(.psram_data)
+    } > PSRAM
+}
+
+// In C code:
+__attribute__((section(".psram_data")))
+static pb_value_bits_t psram_buffer[PB_MAX_PIXELS * 3 * 2 * PB_MAX_BOARDS];
+```
+
+### Streaming DMA for Large Transfers
+
+For sequential reads without stalling other DMA channels, use the XIP streaming interface:
+
+```c
+// Program streaming read from PSRAM
+xip_ctrl_hw->stream_addr = (uint32_t)&psram_buffer[frame_offset];
+xip_ctrl_hw->stream_ctr = frame_word_count;
+
+// DMA from streaming FIFO to PIO
+channel_config_set_dreq(&cfg, DREQ_XIP_STREAM);
+dma_channel_configure(chan, &cfg,
+    &pio->txf[sm],      // Write to PIO FIFO
+    XIP_AUX_BASE,       // Read from XIP stream FIFO
+    frame_word_count,
+    true);
+```
+
+This provides near-maximum QSPI throughput with minimal bus contention.
+
+### Implementation Steps
+
+1. **Configure QMI for PSRAM** on CS1 (clock speed, read/write commands)
+2. **Update linker script** with PSRAM memory region
+3. **Declare buffers in PSRAM** via section attribute
+4. **Modify `pb_driver_init()`** to use PSRAM buffer address
+5. **Update DMA setup** to use XIP streaming for output
+
+### Trade-offs
+
+| Aspect | Current (SRAM only) | PSRAM Streaming |
+|--------|---------------------|-----------------|
+| Total display size | ~16k pixels (limited by SRAM) | 100k+ pixels |
+| Multi-board | Limited by main board SRAM | Full 4-board support |
+| Sparse configs | Wastes SRAM on short strings | Efficient |
+| Latency | Zero (DMA from SRAM) | Minimal (ring buffer) |
+| Complexity | Simple | DMA chaining, IRQ handler |
+| CPU overhead | None during output | IRQ servicing (~1%) |
+
+### When to Use
+
+- **SRAM mode:** Single board, uniform string lengths, ≤16k total pixels
+- **PSRAM mode:** Multi-board displays, sparse configurations, or 100k+ pixel installations
+
+This could be a compile-time or runtime configuration option via `pb_driver_config_t`.
+

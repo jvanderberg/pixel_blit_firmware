@@ -28,7 +28,7 @@
 #endif
 
 #ifndef PB_MAX_PIXELS
-#define PB_MAX_PIXELS 256
+#define PB_MAX_PIXELS 512
 #endif
 
 #ifndef PB_MAX_STRINGS

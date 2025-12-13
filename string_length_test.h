@@ -6,7 +6,7 @@
 #include "pb_led_driver.h"
 
 #define STRING_LENGTH_TEST_NUM_STRINGS 32
-#define STRING_LENGTH_TEST_MAX_PIXELS 256  // Must match PB_MAX_PIXELS
+#define STRING_LENGTH_TEST_MAX_PIXELS 512  // Must match PB_MAX_PIXELS
 
 typedef struct {
     pb_driver_t *driver;
