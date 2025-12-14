@@ -8,7 +8,7 @@
 
 4. ~~Add SD card configuration file (`config.csv`) for board/string layout.~~ ✅
 
-5. Add EEPROM/flash settings persistence. Save user settings (brightness level, last played file, etc.) to non-volatile storage so they survive power cycles. Consider using RP2350 flash or external EEPROM.
+5. ~~Add EEPROM/flash settings persistence. Save user settings (brightness level, last played file, etc.) to non-volatile storage so they survive power cycles. Consider using RP2350 flash or external EEPROM.~~ ✅
 
 6. Remove board address ADC resistor ladder logic. Instead, set board ID via config.csv or through a menu item in the user interface.
 

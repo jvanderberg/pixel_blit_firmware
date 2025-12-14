@@ -1,5 +1,6 @@
 #include "side_effects.h"
 #include "views.h"
+#include "flash_settings.h"
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "hardware/sync.h"  // For __dmb() memory barrier
@@ -228,6 +229,11 @@ void side_effects_apply(const HardwareContext* hw,
 
     // Always render view on state change
     views_render(hw->display, new_state);
+
+    // Check if settings need saving (debounced)
+    flash_settings_check_save(new_state->brightness_level,
+                              new_state->sd_card.is_playing,
+                              new_state->sd_card.playing_index);
 }
 
 bool side_effects_tick(const HardwareContext* hw, const AppState* state) {

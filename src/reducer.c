@@ -1,5 +1,6 @@
 #include "reducer.h"
 #include "board_config.h"
+#include <stdio.h>
 
 // Helper: stop all tests and playback
 static AppState stop_all_output(AppState state) {
@@ -281,10 +282,19 @@ static AppState handle_sd_files(const AppState* state, const Action* action) {
         for(int i=0; msg[i] && i<23; i++) new_state.sd_card.status_msg[i] = msg[i];
         new_state.sd_card.auto_play_pending = false;  // Can't auto-play with no files
     } else if (state->sd_card.auto_play_pending) {
-        // Auto-play was requested via IR - start first file
+        // Auto-play was requested (IR remote or saved settings restore)
         new_state.sd_card.is_playing = true;
-        new_state.sd_card.playing_index = 0;
+        // Use saved playing_index, but bounds-check against current file count
+        uint8_t saved_index = state->sd_card.playing_index;
+        if (saved_index >= new_state.sd_card.file_count) {
+            saved_index = 0;  // Fall back to first file if saved index is invalid
+        }
+        new_state.sd_card.playing_index = saved_index;
+        new_state.sd_card.scroll_index = saved_index;
         new_state.sd_card.auto_play_pending = false;
+        // Navigate to SD card playing view
+        new_state.menu_selection = MENU_SD_CARD;
+        new_state.in_detail_view = true;
     }
     return new_state;
 }

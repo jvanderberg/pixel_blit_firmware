@@ -69,6 +69,7 @@ add_executable(pixel_blit_firmware
         src/views.c
         src/sd_ops.c
         src/board_config.c
+        src/flash_settings.c
         sh1106.c
         string_test.c
         toggle_test.c
@@ -102,11 +103,13 @@ pico_enable_stdio_usb(pixel_blit_firmware 1)
 target_link_libraries(pixel_blit_firmware
         pico_stdlib
         pico_multicore
+        pico_flash
         hardware_i2c
         hardware_adc
         hardware_spi
         hardware_pio
         hardware_clocks
+        hardware_flash
         pb_led_driver
         fseq_parser
 )

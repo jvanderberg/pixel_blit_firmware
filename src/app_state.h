@@ -160,6 +160,18 @@ static inline AppState app_state_init(void) {
     return state;
 }
 
+// Initialize state with saved settings (for persistence restore)
+static inline AppState app_state_init_with_settings(uint8_t brightness, bool was_playing, uint8_t playing_index) {
+    AppState state = app_state_init();
+    state.brightness_level = brightness;
+    if (was_playing) {
+        // Just set intent - main loop will trigger scan, reducer will navigate on completion
+        state.sd_card.auto_play_pending = true;
+        state.sd_card.playing_index = playing_index;
+    }
+    return state;
+}
+
 // Check if state changed (O(1) version comparison)
 static inline bool app_state_dirty(const AppState* old_state, const AppState* new_state) {
     return old_state->version != new_state->version;

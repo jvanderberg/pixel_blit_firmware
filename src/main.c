@@ -6,6 +6,7 @@
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "pico/multicore.h"
+#include "pico/flash.h"  // For flash_safe_execute_core_init
 #include "hardware/i2c.h"
 #include "hardware/adc.h"
 #include "hardware/gpio.h"
@@ -36,6 +37,8 @@
 #include "reducer.h"
 #include "side_effects.h"
 #include "views.h"
+#include "flash_settings.h"
+#include "pb_led_driver.h"
 
 // Pin definitions
 #define DISP_SDA_PIN 46
@@ -74,6 +77,9 @@ char sd_file_list[SD_MAX_FILES][SD_FILENAME_LEN];
 volatile bool rainbow_core1_running = false;
 
 void core1_rainbow_entry(void) {
+    // Allow core0 to pause us for flash operations
+    flash_safe_execute_core_init();
+
     while (true) {
         __dmb();  // Ensure we see latest flag value from Core0
         if (!rainbow_core1_running) break;
@@ -85,6 +91,9 @@ void core1_rainbow_entry(void) {
 volatile bool fseq_core1_running = false;
 
 void core1_fseq_entry(void) {
+    // Allow core0 to pause us for flash operations
+    flash_safe_execute_core_init();
+
     fseq_player_core1_entry();
 }
 
@@ -281,8 +290,16 @@ int main() {
     hw_context.string_length_test = &string_length_test_ctx;
     hw_context.fseq_player = &fseq_player_ctx;
 
-    // Initialize application state
-    current_state = app_state_init();
+    // Load saved settings and initialize application state
+    flash_settings_t saved_settings;
+    if (flash_settings_load(&saved_settings)) {
+        current_state = app_state_init_with_settings(
+            saved_settings.brightness,
+            saved_settings.was_playing,
+            saved_settings.playing_index);
+    } else {
+        current_state = app_state_init();
+    }
 
     // Initialize IR receiver
     ir_init(IR_PIN);
@@ -295,6 +312,12 @@ int main() {
 
     // Give GPIO interrupts highest priority for reliable IR reception
     irq_set_priority(IO_IRQ_BANK0, 0x00);
+
+    // Set initial brightness from loaded state
+    uint8_t init_brightness = current_state.brightness_level;
+    if (init_brightness < 1) init_brightness = 1;
+    if (init_brightness > 10) init_brightness = 10;
+    pb_set_global_brightness((uint8_t)(init_brightness * 25 + (init_brightness > 1 ? 5 : 0)));
 
     // Render initial view
     views_render(&display, &current_state);
@@ -339,11 +362,14 @@ int main() {
             }
         }
 
-        // SD Card Scan (only once when entering SD view)
-        if (current_state.in_detail_view &&
-            current_state.menu_selection == MENU_SD_CARD &&
-            current_state.sd_card.needs_scan) {
+        // SD Card Scan - when entering SD view OR auto-play pending on boot
+        bool need_scan_for_view = current_state.in_detail_view &&
+                                  current_state.menu_selection == MENU_SD_CARD &&
+                                  current_state.sd_card.needs_scan;
+        bool need_scan_for_autoplay = current_state.sd_card.auto_play_pending &&
+                                      !current_state.sd_card.mounted;
 
+        if (need_scan_for_view || need_scan_for_autoplay) {
             sd_ops_scan_result_t scan = sd_ops_scan_fseq_files();
 
             switch (scan.result) {
