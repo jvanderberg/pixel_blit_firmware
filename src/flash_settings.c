@@ -52,8 +52,25 @@ bool flash_settings_load(flash_settings_t* settings) {
     // Check magic number
     if (flash_data->magic != FLASH_SETTINGS_MAGIC) return false;
 
-    // Check version (for future migration support)
-    if (flash_data->version != FLASH_SETTINGS_VERSION) return false;
+    // Check version - support migration from v1
+    if (flash_data->version != FLASH_SETTINGS_VERSION) {
+        if (flash_data->version == 1) {
+            // Migrate from v1: auto_loop defaults to false
+            // CRC check uses v1 layout, so skip CRC for migration
+            if (flash_data->brightness < 1 || flash_data->brightness > 10) return false;
+            if (flash_data->playing_index > 15) return false;
+            settings->magic = FLASH_SETTINGS_MAGIC;
+            settings->version = FLASH_SETTINGS_VERSION;
+            settings->brightness = flash_data->brightness;
+            settings->was_playing = flash_data->was_playing;
+            settings->playing_index = flash_data->playing_index;
+            settings->auto_loop = 0;  // Default for migrated settings
+            memset(settings->reserved, 0, sizeof(settings->reserved));
+            settings->crc = calc_settings_crc(settings);
+            return true;
+        }
+        return false;  // Unknown version
+    }
 
     // Verify CRC
     uint32_t expected_crc = calc_settings_crc(flash_data);
@@ -160,12 +177,13 @@ void flash_settings_clear(void) {
     save_pending = false;
 }
 
-void flash_settings_check_save(uint8_t brightness, bool is_playing, uint8_t playing_index) {
+void flash_settings_check_save(uint8_t brightness, bool is_playing, uint8_t playing_index, bool auto_loop) {
     // Initialize last_saved on first call if not loaded from flash
     if (!initialized) {
         last_saved.brightness = brightness;
         last_saved.was_playing = is_playing ? 1 : 0;
         last_saved.playing_index = playing_index;
+        last_saved.auto_loop = auto_loop ? 1 : 0;
         initialized = true;
         return;
     }
@@ -173,18 +191,21 @@ void flash_settings_check_save(uint8_t brightness, bool is_playing, uint8_t play
     // Check if settings changed
     bool changed = (brightness != last_saved.brightness) ||
                    ((is_playing ? 1 : 0) != last_saved.was_playing) ||
-                   (playing_index != last_saved.playing_index);
+                   (playing_index != last_saved.playing_index) ||
+                   ((auto_loop ? 1 : 0) != last_saved.auto_loop);
 
     if (changed) {
         // Update pending save data
         pending_save.brightness = brightness;
         pending_save.was_playing = is_playing ? 1 : 0;
         pending_save.playing_index = playing_index;
+        pending_save.auto_loop = auto_loop ? 1 : 0;
 
         // Update last_saved so we don't detect the same change next frame
         last_saved.brightness = brightness;
         last_saved.was_playing = is_playing ? 1 : 0;
         last_saved.playing_index = playing_index;
+        last_saved.auto_loop = auto_loop ? 1 : 0;
 
         // Reset debounce timer
         save_pending = true;

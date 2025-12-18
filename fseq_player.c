@@ -131,6 +131,7 @@ bool fseq_player_start(fseq_player_t *ctx, const char *filename) {
 
     ctx->stop_requested = false;
     ctx->fps = 0;
+    ctx->loop_count = 0;
     ctx->running = true;
 
     printf("FSEQ: Starting playback of %s\n", ctx->filename);
@@ -148,6 +149,9 @@ void fseq_player_stop(fseq_player_t *ctx) {
         g_file_open = false;
     }
 
+    // Force cleanup parser singleton in case Core 1 was killed mid-operation
+    fseq_parser_force_cleanup();
+
     // Clean up driver
     if (ctx->driver) {
         pb_clear_all(ctx->driver, 0x000000);
@@ -164,6 +168,10 @@ bool fseq_player_is_running(const fseq_player_t *ctx) {
 
 uint16_t fseq_player_get_fps(const fseq_player_t *ctx) {
     return ctx ? ctx->fps : 0;
+}
+
+uint32_t fseq_player_get_loop_count(const fseq_player_t *ctx) {
+    return ctx ? ctx->loop_count : 0;
 }
 
 // Core 1 entry point - runs the full playback loop
@@ -272,6 +280,7 @@ void fseq_player_core1_entry(void) {
 
         // Loop based on header frame count, not EOF
         if (frames_played >= header.frame_count) {
+            ctx->loop_count++;  // Signal that sequence completed
             f_lseek(&g_fseq_file, header.channel_data_offset);
             fseq_parser_reset(parser);
             frames_played = 0;

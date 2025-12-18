@@ -39,6 +39,7 @@ typedef struct {
     bool is_playing;
     uint8_t playing_index;         // Index into sd_file_list (reducer stays pure)
     bool auto_play_pending;        // Start playback after SD scan completes
+    bool auto_loop;                // When true, auto-advance to next file on completion
 } SdCardState;
 
 // External static file list (defined in main.c)
@@ -141,6 +142,7 @@ static inline AppState app_state_init(void) {
             .scroll_index = 0,
             .is_playing = false,
             .playing_index = 0,
+            .auto_loop = false,
         },
         .string_test = {.run_state = TEST_STOPPED},
         .toggle_test = {.run_state = TEST_STOPPED},
@@ -161,9 +163,10 @@ static inline AppState app_state_init(void) {
 }
 
 // Initialize state with saved settings (for persistence restore)
-static inline AppState app_state_init_with_settings(uint8_t brightness, bool was_playing, uint8_t playing_index) {
+static inline AppState app_state_init_with_settings(uint8_t brightness, bool was_playing, uint8_t playing_index, bool auto_loop) {
     AppState state = app_state_init();
     state.brightness_level = brightness;
+    state.sd_card.auto_loop = auto_loop;
     if (was_playing) {
         // Just set intent - main loop will trigger scan, reducer will navigate on completion
         state.sd_card.auto_play_pending = true;

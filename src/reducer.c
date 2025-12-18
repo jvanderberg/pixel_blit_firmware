@@ -382,6 +382,30 @@ static AppState handle_brightness_down(const AppState* state) {
     return new_state;
 }
 
+// Handle auto-loop toggle
+static AppState handle_auto_toggle(const AppState* state) {
+    AppState new_state = app_state_new_version(state);
+    new_state.sd_card.auto_loop = !state->sd_card.auto_loop;
+    return new_state;
+}
+
+// Handle FSEQ loop complete - advance to next file if auto_loop enabled
+static AppState handle_fseq_loop_complete(const AppState* state) {
+    // Only advance if auto_loop is enabled and we're playing
+    if (!state->sd_card.auto_loop || !state->sd_card.is_playing) {
+        return *state;
+    }
+
+    // Advance to next file
+    if (state->sd_card.file_count > 0) {
+        AppState new_state = app_state_new_version(state);
+        new_state.sd_card.playing_index = (state->sd_card.playing_index + 1) % state->sd_card.file_count;
+        return new_state;
+    }
+
+    return *state;
+}
+
 // Main reducer function
 AppState reduce(const AppState* state, const Action* action) {
     // If powered off, only respond to buttons (wake up) or power toggle
@@ -434,6 +458,12 @@ AppState reduce(const AppState* state, const Action* action) {
 
         case ACTION_BRIGHTNESS_DOWN:
             return handle_brightness_down(state);
+
+        case ACTION_AUTO_TOGGLE:
+            return handle_auto_toggle(state);
+
+        case ACTION_FSEQ_LOOP_COMPLETE:
+            return handle_fseq_loop_complete(state);
 
         case ACTION_NONE:
         default:

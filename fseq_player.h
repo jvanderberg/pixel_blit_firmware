@@ -16,6 +16,7 @@ typedef struct {
     char filename[32];  // Support long filenames
     uint16_t target_fps;
     uint16_t fps;
+    volatile uint32_t loop_count;  // Increments each time sequence loops
 } fseq_player_t;
 
 // Initialize the player (creates pb_driver with correct layout)
@@ -35,3 +36,6 @@ bool fseq_player_is_running(const fseq_player_t *ctx);
 
 // Get current FPS
 uint16_t fseq_player_get_fps(const fseq_player_t *ctx);
+
+// Get loop count (increments each time sequence completes)
+uint32_t fseq_player_get_loop_count(const fseq_player_t *ctx);

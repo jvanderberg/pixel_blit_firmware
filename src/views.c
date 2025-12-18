@@ -111,11 +111,19 @@ static void render_sd_card_detail(sh1106_t* display, const AppState* state) {
 
     // Show playback state
     if (state->sd_card.is_playing) {
-        sh1106_draw_string(display, 0, 0, "PLAYING", true);
+        // Show PLAYING with AUTO indicator if enabled
+        if (state->sd_card.auto_loop) {
+            sh1106_draw_string(display, 0, 0, "PLAYING [AUTO]", true);
+        } else {
+            sh1106_draw_string(display, 0, 0, "PLAYING", true);
+        }
         // Look up filename from static buffer using playing_index
         sh1106_draw_string(display, 0, 16, sd_file_list[state->sd_card.playing_index], false);
-        sh1106_draw_string(display, 0, 40, "Press any button", false);
-        sh1106_draw_string(display, 0, 48, "to stop", false);
+        // Show file position in playlist
+        snprintf(line, sizeof(line), "File %d/%d",
+                 state->sd_card.playing_index + 1, state->sd_card.file_count);
+        sh1106_draw_string(display, 0, 32, line, false);
+        sh1106_draw_string(display, 0, 48, "Any btn: stop", false);
         sh1106_render(display);
         return;
     }

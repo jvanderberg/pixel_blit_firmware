@@ -96,9 +96,16 @@ bool fseq_parser_push(fseq_parser_ctx_t* ctx, const uint8_t* data, uint32_t len)
 
 /**
  * @brief Reset the parser state.
- * Call this after seeking the file pointer to the start of channel data 
+ * Call this after seeking the file pointer to the start of channel data
  * (e.g., when looping the animation).
  */
 void fseq_parser_reset(fseq_parser_ctx_t* ctx);
+
+/**
+ * @brief Force cleanup of the parser singleton.
+ * Call this when Core 1 was forcibly reset and couldn't clean up properly.
+ * This clears the singleton flag so a new parser can be initialized.
+ */
+void fseq_parser_force_cleanup(void);
 
 #endif // FSEQ_PARSER_H

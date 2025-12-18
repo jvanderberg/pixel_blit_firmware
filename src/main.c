@@ -296,7 +296,8 @@ int main() {
         current_state = app_state_init_with_settings(
             saved_settings.brightness,
             saved_settings.was_playing,
-            saved_settings.playing_index);
+            saved_settings.playing_index,
+            saved_settings.auto_loop);
     } else {
         current_state = app_state_init();
     }
@@ -352,6 +353,9 @@ int main() {
                     break;
                 case PLAY:
                     dispatch(action_fseq_next(now_us));
+                    break;
+                case AUTO:
+                    dispatch(action_auto_toggle(now_us));
                     break;
                 case BRIGHTNESS_UP:
                     dispatch(action_brightness_up(now_us));
@@ -412,6 +416,26 @@ int main() {
             uint16_t fps = rainbow_test_get_fps(hw_context.rainbow_test);
             if (fps != current_state.rainbow_test.fps) {
                 dispatch(action_rainbow_frame_complete(now_us, fps));
+            }
+        }
+
+        // Check for FSEQ loop completion (for auto-advance mode)
+        {
+            static uint32_t last_observed_loop_count = 0;
+            static uint8_t last_playing_index = 255;
+
+            // Reset loop counter when file changes (manual skip or auto-advance)
+            if (current_state.sd_card.playing_index != last_playing_index) {
+                last_observed_loop_count = 0;
+                last_playing_index = current_state.sd_card.playing_index;
+            }
+
+            if (current_state.sd_card.is_playing && current_state.sd_card.auto_loop) {
+                uint32_t loop_count = fseq_player_get_loop_count(hw_context.fseq_player);
+                if (loop_count > last_observed_loop_count) {
+                    last_observed_loop_count = loop_count;
+                    dispatch(action_fseq_loop_complete(now_us));
+                }
             }
         }
 

@@ -26,7 +26,9 @@ typedef enum {
     ACTION_POWER_TOGGLE,
 
     // Playback events
-    ACTION_FSEQ_NEXT,  // Skip to next file during playback
+    ACTION_FSEQ_NEXT,           // Skip to next file during playback
+    ACTION_AUTO_TOGGLE,         // Toggle auto-loop mode
+    ACTION_FSEQ_LOOP_COMPLETE,  // Current file finished one loop (for auto-advance)
 
     // Brightness events
     ACTION_BRIGHTNESS_UP,
@@ -156,6 +158,20 @@ static inline Action action_power_toggle(uint32_t timestamp) {
 static inline Action action_fseq_next(uint32_t timestamp) {
     return (Action){
         .type = ACTION_FSEQ_NEXT,
+        .timestamp = timestamp,
+    };
+}
+
+static inline Action action_auto_toggle(uint32_t timestamp) {
+    return (Action){
+        .type = ACTION_AUTO_TOGGLE,
+        .timestamp = timestamp,
+    };
+}
+
+static inline Action action_fseq_loop_complete(uint32_t timestamp) {
+    return (Action){
+        .type = ACTION_FSEQ_LOOP_COMPLETE,
         .timestamp = timestamp,
     };
 }

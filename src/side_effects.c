@@ -85,7 +85,7 @@ static void stop_all_core1_tasks(const HardwareContext* hw) {
         fseq_core1_running = false;
         hw->fseq_player->stop_requested = true;
         __dmb();
-        sleep_ms(100);
+        sleep_ms(300);  // Must be > frame time (200ms at 5fps)
         multicore_reset_core1();
         fseq_player_stop(hw->fseq_player);
     }
@@ -202,8 +202,8 @@ void side_effects_apply(const HardwareContext* hw,
             fseq_core1_running = false;
             __dmb();  // Ensure flag is visible to Core1
             // Wait for Core 1 to exit (it checks the flag each frame)
-            // At 60fps, frames are ~16ms, so 100ms is plenty
-            sleep_ms(100);
+            // Must be > worst-case frame time (200ms at 5fps)
+            sleep_ms(300);
             // Now safe to reset (Core 1 should have exited and closed file)
             multicore_reset_core1();
             fseq_player_stop(hw->fseq_player);
@@ -215,7 +215,7 @@ void side_effects_apply(const HardwareContext* hw,
         // Stop current playback
         fseq_core1_running = false;
         __dmb();
-        sleep_ms(100);
+        sleep_ms(300);  // Must be > frame time (200ms at 5fps)
         multicore_reset_core1();
         fseq_player_stop(hw->fseq_player);
 
@@ -233,7 +233,8 @@ void side_effects_apply(const HardwareContext* hw,
     // Check if settings need saving (debounced)
     flash_settings_check_save(new_state->brightness_level,
                               new_state->sd_card.is_playing,
-                              new_state->sd_card.playing_index);
+                              new_state->sd_card.playing_index,
+                              new_state->sd_card.auto_loop);
 }
 
 bool side_effects_tick(const HardwareContext* hw, const AppState* state) {
