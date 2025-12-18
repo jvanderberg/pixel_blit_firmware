@@ -66,6 +66,7 @@ add_executable(pixel_blit_firmware
         src/main.c
         src/reducer.c
         src/side_effects.c
+        src/core1_task.c
         src/views.c
         src/sd_ops.c
         src/board_config.c

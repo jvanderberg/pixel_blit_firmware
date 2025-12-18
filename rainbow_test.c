@@ -59,6 +59,9 @@ static bool create_driver(rainbow_test_t *ctx)
         return false;
     }
 
+    // TODO: ctx->raster lifetime is tied to ctx->driver. If driver is destroyed,
+    // raster pointer becomes invalid. Currently handled by NULLing in destroy_driver(),
+    // but consider using a getter that validates driver exists.
     ctx->raster = pb_raster_get(ctx->driver, ctx->raster_id);
     printf("Rainbow: Driver created (color order: %d)\n", color_order);
     return true;
@@ -112,10 +115,11 @@ void rainbow_test_stop(rainbow_test_t *ctx)
     ctx->running = false;
 
     if (ctx->driver) {
-        pb_show_wait(ctx->driver);
+        pb_show_wait(ctx->driver);        // Wait for any previous DMA
         pb_raster_fill(ctx->raster, 0x000000);
         pb_raster_show(ctx->driver, ctx->raster);
-        pb_show(ctx->driver);
+        pb_show(ctx->driver);             // Start DMA to clear
+        pb_show_wait(ctx->driver);        // Wait for THIS DMA to complete!
         destroy_driver(ctx);
     }
 }

@@ -39,6 +39,7 @@
 #include "views.h"
 #include "flash_settings.h"
 #include "pb_led_driver.h"
+#include "core1_task.h"
 
 // Pin definitions
 #define DISP_SDA_PIN 46
@@ -72,30 +73,6 @@ static fseq_player_t fseq_player_ctx;
 
 // Static file list buffer (declared extern in app_state.h)
 char sd_file_list[SD_MAX_FILES][SD_FILENAME_LEN];
-
-// Core1 rainbow test control (extern'd by side_effects.c)
-volatile bool rainbow_core1_running = false;
-
-void core1_rainbow_entry(void) {
-    // Allow core0 to pause us for flash operations
-    flash_safe_execute_core_init();
-
-    while (true) {
-        __dmb();  // Ensure we see latest flag value from Core0
-        if (!rainbow_core1_running) break;
-        rainbow_test_task(&rainbow_test_ctx);
-    }
-}
-
-// Core1 FSEQ playback control (extern'd by side_effects.c)
-volatile bool fseq_core1_running = false;
-
-void core1_fseq_entry(void) {
-    // Allow core0 to pause us for flash operations
-    flash_safe_execute_core_init();
-
-    fseq_player_core1_entry();
-}
 
 // Button state
 static volatile uint64_t select_last_press_us = 0;
@@ -290,6 +267,11 @@ int main() {
     hw_context.string_length_test = &string_length_test_ctx;
     hw_context.fseq_player = &fseq_player_ctx;
 
+    // Initialize and launch Core 1 task system
+    core1_task_init(&fseq_player_ctx, &rainbow_test_ctx);
+    multicore_launch_core1(core1_main);
+    printf("Core 1 launched\n");
+
     // Load saved settings and initialize application state
     flash_settings_t saved_settings;
     if (flash_settings_load(&saved_settings)) {
@@ -431,7 +413,7 @@ int main() {
             }
 
             if (current_state.sd_card.is_playing && current_state.sd_card.auto_loop) {
-                uint32_t loop_count = fseq_player_get_loop_count(hw_context.fseq_player);
+                uint32_t loop_count = core1_get_fseq_loop_count();
                 if (loop_count > last_observed_loop_count) {
                     last_observed_loop_count = loop_count;
                     dispatch(action_fseq_loop_complete(now_us));

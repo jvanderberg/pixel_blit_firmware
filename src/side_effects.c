@@ -1,18 +1,9 @@
 #include "side_effects.h"
+#include "core1_task.h"
 #include "views.h"
 #include "flash_settings.h"
 #include "pico/stdlib.h"
-#include "pico/multicore.h"
-#include "hardware/sync.h"  // For __dmb() memory barrier
 #include "pb_led_driver.h"
-
-// Core1 control (defined in main.c)
-extern volatile bool rainbow_core1_running;
-extern void core1_rainbow_entry(void);
-
-// FSEQ playback Core1 control
-extern volatile bool fseq_core1_running;
-extern void core1_fseq_entry(void);
 
 // Check if test run state changed
 static bool string_test_changed(const AppState* old, const AppState* new) {
@@ -68,29 +59,6 @@ static uint8_t brightness_level_to_hw(uint8_t level) {
     return (uint8_t)(level * 25 + (level > 1 ? 5 : 0));
 }
 
-// Stop all running Core1 tasks and tests
-static void stop_all_core1_tasks(const HardwareContext* hw) {
-    // Stop rainbow test if running on Core1
-    if (rainbow_core1_running) {
-        rainbow_core1_running = false;
-        __dmb();
-        sleep_ms(20);
-        multicore_reset_core1();
-        rainbow_test_stop(hw->rainbow_test);
-    }
-
-    // Stop FSEQ playback if running on Core1
-    if (fseq_core1_running) {
-        // Set both flags so Core1 can exit at multiple check points
-        fseq_core1_running = false;
-        hw->fseq_player->stop_requested = true;
-        __dmb();
-        sleep_ms(300);  // Must be > frame time (200ms at 5fps)
-        multicore_reset_core1();
-        fseq_player_stop(hw->fseq_player);
-    }
-}
-
 void side_effects_init(HardwareContext* hw) {
     // Hardware contexts are initialized in main
     (void)hw;
@@ -102,8 +70,8 @@ void side_effects_apply(const HardwareContext* hw,
     // Handle power state changes
     if (power_state_changed(old_state, new_state)) {
         if (!new_state->is_powered_on) {
-            // Powering off: stop all output
-            stop_all_core1_tasks(hw);
+            // Powering off: stop Core 1 task and all tests
+            core1_stop_and_wait();
             string_test_stop(hw->string_test);
             toggle_test_stop(hw->toggle_test);
             string_length_test_stop(hw->string_length_test);
@@ -142,23 +110,12 @@ void side_effects_apply(const HardwareContext* hw,
         }
     }
 
-    // Handle rainbow test state changes - runs on core1
+    // Handle rainbow test state changes - runs on Core 1
     if (rainbow_test_changed(old_state, new_state)) {
         if (new_state->rainbow_test.run_state == TEST_RUNNING) {
-            // Guard: only launch if Core1 is not already running
-            if (!rainbow_core1_running && !fseq_core1_running) {
-                rainbow_test_start(hw->rainbow_test);
-                rainbow_core1_running = true;
-                __dmb();  // Ensure flag is visible to Core1 before launch
-                multicore_launch_core1(core1_rainbow_entry);
-            }
+            core1_start_rainbow();
         } else {
-            // Signal Core 1 to stop and wait for it to exit gracefully
-            rainbow_core1_running = false;
-            __dmb();  // Ensure flag is visible to Core1
-            sleep_ms(20);  // Allow Core 1 to finish current frame and exit loop
-            multicore_reset_core1();
-            rainbow_test_stop(hw->rainbow_test);
+            core1_stop_and_wait();
         }
     }
 
@@ -185,46 +142,22 @@ void side_effects_apply(const HardwareContext* hw,
                                   new_state->string_length.current_pixel);
     }
 
-    // Handle FSEQ playback state changes - runs on core1
+    // Handle FSEQ playback state changes - runs on Core 1
     if (fseq_playback_changed(old_state, new_state)) {
         if (new_state->sd_card.is_playing) {
-            // Guard: only launch if Core1 is not already running
-            if (!fseq_core1_running && !rainbow_core1_running) {
-                // Start playback - look up filename from static buffer
-                const char* filename = sd_file_list[new_state->sd_card.playing_index];
-                fseq_player_start(hw->fseq_player, filename);
-                fseq_core1_running = true;
-                __dmb();  // Ensure flag is visible to Core1 before launch
-                multicore_launch_core1(core1_fseq_entry);
-            }
+            // Start playback - look up filename from static buffer
+            const char* filename = sd_file_list[new_state->sd_card.playing_index];
+            core1_start_fseq(filename);
         } else {
-            // Signal Core 1 to stop - let it exit gracefully to close file properly
-            fseq_core1_running = false;
-            __dmb();  // Ensure flag is visible to Core1
-            // Wait for Core 1 to exit (it checks the flag each frame)
-            // Must be > worst-case frame time (200ms at 5fps)
-            sleep_ms(300);
-            // Now safe to reset (Core 1 should have exited and closed file)
-            multicore_reset_core1();
-            fseq_player_stop(hw->fseq_player);
+            core1_stop_and_wait();
         }
     }
 
     // Handle skip to next file during playback
     if (fseq_file_changed(old_state, new_state)) {
-        // Stop current playback
-        fseq_core1_running = false;
-        __dmb();
-        sleep_ms(300);  // Must be > frame time (200ms at 5fps)
-        multicore_reset_core1();
-        fseq_player_stop(hw->fseq_player);
-
-        // Start new file
+        // Start new file (core1_start_fseq stops current task first)
         const char* filename = sd_file_list[new_state->sd_card.playing_index];
-        fseq_player_start(hw->fseq_player, filename);
-        fseq_core1_running = true;
-        __dmb();
-        multicore_launch_core1(core1_fseq_entry);
+        core1_start_fseq(filename);
     }
 
     // Always render view on state change
@@ -253,7 +186,7 @@ bool side_effects_tick(const HardwareContext* hw, const AppState* state) {
         toggle_test_task(hw->toggle_test);
     }
 
-    // Rainbow test runs on core1, no tick needed here
+    // Rainbow test and FSEQ run on Core 1, no tick needed here
     return state->rainbow_test.run_state == TEST_RUNNING;
 }
 

@@ -87,6 +87,78 @@ Hardware Events → Actions → Reducer → New State → SideEffects + View
 
 4. **Single GPIO callback per core**: Pico SDK only allows ONE `gpio_set_irq_enabled_with_callback()` per core. All GPIO interrupts (buttons, IR, etc.) must share a combined ISR. Use `gpio_set_irq_enabled()` for additional pins after the initial callback setup.
 
+## Memory Safety Patterns (CRITICAL)
+
+When writing or refactoring embedded C code, watch for these patterns that cause memory corruption:
+
+### 1. Pointer Lifetime Mismatches
+**NEVER** store a pointer to a local/stack variable in a struct that outlives the function:
+```c
+// BAD - string_lengths is on stack, pointer becomes dangling after function returns
+void setup_parser() {
+    uint16_t string_lengths[32];  // Stack variable!
+    layout.string_lengths = string_lengths;  // Pointer stored in struct
+    parser_init(&layout);  // Parser keeps the pointer
+}  // string_lengths destroyed here, parser has dangling pointer
+
+// GOOD - use static or heap allocation for data that outlives the function
+static uint16_t g_string_lengths[32];  // Static - lives forever
+void setup_parser() {
+    layout.string_lengths = g_string_lengths;
+    parser_init(&layout);
+}
+```
+
+### 2. DMA/Async Operation Teardown
+**ALWAYS** wait for async operations to complete before freeing resources:
+```c
+// BAD - DMA may still be running when driver is destroyed
+pb_show(driver);           // Starts DMA (async!)
+pb_driver_deinit(driver);  // Destroys driver while DMA runs -> corruption
+
+// GOOD - wait for DMA to complete
+pb_show(driver);
+pb_show_wait(driver);      // Block until DMA finishes
+pb_driver_deinit(driver);  // Safe now
+```
+
+### 3. Multicore Memory Visibility
+Static initializers run on Core 0. Core 1 may not see them immediately due to caching:
+```c
+// BAD - Core 1 might see uninitialized values
+static volatile bool flag = false;  // Initialized by Core 0
+void core1_main() {
+    while (!flag) {}  // May never see the initialized value!
+}
+
+// GOOD - explicit initialization with memory barrier on Core 1
+void core1_main() {
+    flag = false;  // Explicit init
+    __dmb();       // Memory barrier
+    // Now safe to use
+}
+```
+
+### 4. Struct Containing Pointers
+When a struct contains a pointer field, copying the struct does NOT copy the pointed-to data:
+```c
+typedef struct {
+    uint16_t* lengths;  // Pointer field
+} layout_t;
+
+// BAD - shallow copy, both point to same memory
+layout_t a = {.lengths = array};
+layout_t b = a;  // b.lengths == a.lengths (same pointer!)
+
+// If caller expects deep copy, document it or copy explicitly
+```
+
+### 5. Refactoring Function Splits
+When splitting a function into start/run/cleanup phases, check that:
+- Local variables accessed across phases become static or are passed explicitly
+- Pointers stored during "start" remain valid through "run" and "cleanup"
+- Resources acquired in "start" are released in "cleanup" even on error paths
+
 ## Running Tests
 
 The pb_led_driver library has host-based unit tests:

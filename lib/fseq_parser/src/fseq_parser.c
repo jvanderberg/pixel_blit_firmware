@@ -36,6 +36,9 @@ fseq_parser_ctx_t* fseq_parser_init(void* user_data, fseq_pixel_cb pixel_cb, fse
     memset(ctx, 0, sizeof(fseq_parser_ctx_t));
     ctx->user_data = user_data;
     ctx->pixel_cb = pixel_cb;
+    // TODO: This shallow-copies layout, storing the string_lengths pointer.
+    // Callers must ensure layout.string_lengths points to memory that outlives
+    // the parser. Consider copying array data into parser struct instead.
     ctx->layout = layout;
 
     parser_in_use = true;

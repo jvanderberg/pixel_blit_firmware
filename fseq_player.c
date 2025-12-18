@@ -2,22 +2,27 @@
 #include "fseq_parser.h"
 #include "board_config.h"
 #include "pico/stdlib.h"
-#include "hardware/sync.h"  // For __dmb() memory barrier
+#include "hardware/sync.h"
 #include "ff.h"
 #include "sd_card.h"
 #include "hw_config.h"
 #include <stdio.h>
 #include <string.h>
 
-// Global context pointer for Core 1 access
-static fseq_player_t *g_player_ctx = NULL;
+// Notify Core 1 task manager of loop completion (defined in core1_task.c)
+extern void core1_notify_fseq_loop(void);
 
-// External flag set by side_effects.c to signal stop
-extern volatile bool fseq_core1_running;
-
-// Global file handle so we can close it if Core 1 is reset
+// File handle and parser state (persists across start/run_loop/cleanup)
 static FIL g_fseq_file;
 static bool g_file_open = false;
+static fseq_parser_ctx_t *g_parser = NULL;
+static fseq_header_t g_header;
+
+// Parser layout - MUST be static so pointer remains valid after start() returns
+static uint16_t g_string_lengths[BOARD_CONFIG_MAX_STRINGS];
+
+// GPIO base for driver creation
+static uint g_gpio_base = 0;
 
 // Pixel callback - called by fseq_parser for each pixel
 static void pixel_callback(void *user_data, uint8_t string, uint16_t pixel, uint32_t color) {
@@ -27,27 +32,6 @@ static void pixel_callback(void *user_data, uint8_t string, uint16_t pixel, uint
         string_pixel_count > 0 && pixel < string_pixel_count) {
         pb_set_pixel(ctx->driver, 0, string, pixel, color);
     }
-}
-
-// Store GPIO base for lazy driver init
-static uint g_gpio_base = 0;
-
-bool fseq_player_init(fseq_player_t *ctx, uint first_pin) {
-    if (!ctx) {
-        return false;
-    }
-
-    memset(ctx, 0, sizeof(fseq_player_t));
-
-    // Store config for lazy init - driver created in start()
-    g_gpio_base = first_pin;
-    ctx->driver = NULL;
-    ctx->running = false;
-    ctx->stop_requested = false;
-    g_player_ctx = ctx;
-
-    printf("FSEQ: Player initialized (driver created on demand)\n");
-    return true;
 }
 
 // Create driver with correct layout for playback using board_config
@@ -64,7 +48,7 @@ static bool create_driver(fseq_player_t *ctx) {
     for (int i = 0; i < BOARD_CONFIG_MAX_STRINGS; i++) {
         uint16_t pixel_count = board_config_get_pixel_count(i);
         if (pixel_count > 0) {
-            num_strings = i + 1;  // Track highest active string index + 1
+            num_strings = i + 1;
             if (pixel_count > max_pixels) {
                 max_pixels = pixel_count;
             }
@@ -115,8 +99,22 @@ static void destroy_driver(fseq_player_t *ctx) {
     }
 }
 
+bool fseq_player_init(fseq_player_t *ctx, uint first_pin) {
+    if (!ctx) {
+        return false;
+    }
+
+    memset(ctx, 0, sizeof(fseq_player_t));
+    g_gpio_base = first_pin;
+    ctx->driver = NULL;
+    ctx->running = false;
+
+    printf("FSEQ: Player initialized\n");
+    return true;
+}
+
 bool fseq_player_start(fseq_player_t *ctx, const char *filename) {
-    if (!ctx || ctx->running) {
+    if (!ctx) {
         return false;
     }
 
@@ -125,64 +123,14 @@ bool fseq_player_start(fseq_player_t *ctx, const char *filename) {
         return false;
     }
 
+    // Clear any leftover pixel data from previous file
+    if (ctx->driver) {
+        pb_clear_all(ctx->driver, 0x000000);
+    }
+
     // Copy filename
     strncpy(ctx->filename, filename, sizeof(ctx->filename) - 1);
     ctx->filename[sizeof(ctx->filename) - 1] = '\0';
-
-    ctx->stop_requested = false;
-    ctx->fps = 0;
-    ctx->loop_count = 0;
-    ctx->running = true;
-
-    printf("FSEQ: Starting playback of %s\n", ctx->filename);
-    return true;
-}
-
-void fseq_player_stop(fseq_player_t *ctx) {
-    if (!ctx) return;
-
-    ctx->stop_requested = true;
-
-    // Close file if Core 1 didn't get to do it
-    if (g_file_open) {
-        f_close(&g_fseq_file);
-        g_file_open = false;
-    }
-
-    // Force cleanup parser singleton in case Core 1 was killed mid-operation
-    fseq_parser_force_cleanup();
-
-    // Clean up driver
-    if (ctx->driver) {
-        pb_clear_all(ctx->driver, 0x000000);
-        pb_show(ctx->driver);
-        destroy_driver(ctx);
-    }
-
-    ctx->running = false;
-}
-
-bool fseq_player_is_running(const fseq_player_t *ctx) {
-    return ctx && ctx->running;
-}
-
-uint16_t fseq_player_get_fps(const fseq_player_t *ctx) {
-    return ctx ? ctx->fps : 0;
-}
-
-uint32_t fseq_player_get_loop_count(const fseq_player_t *ctx) {
-    return ctx ? ctx->loop_count : 0;
-}
-
-// Core 1 entry point - runs the full playback loop
-void fseq_player_core1_entry(void) {
-    fseq_player_t *ctx = g_player_ctx;
-
-    if (!ctx || !ctx->running) {
-        return;
-    }
-
-    printf("FSEQ Core1: Starting %s\n", ctx->filename);
 
     // Build full path
     char path[40];
@@ -191,9 +139,9 @@ void fseq_player_core1_entry(void) {
     // Open file
     FRESULT fr = f_open(&g_fseq_file, path, FA_READ);
     if (fr != FR_OK) {
-        printf("FSEQ: Failed to open %s\n", path);
-        ctx->running = false;
-        return;
+        printf("FSEQ: Failed to open %s (err %d)\n", path, fr);
+        // Don't destroy driver - keep it for next file attempt
+        return false;
     }
     g_file_open = true;
 
@@ -205,84 +153,104 @@ void fseq_player_core1_entry(void) {
         printf("FSEQ: Failed to read header\n");
         f_close(&g_fseq_file);
         g_file_open = false;
-        ctx->running = false;
-        return;
+        return false;
     }
 
-    // Setup parser layout from board_config
-    uint16_t string_lengths[BOARD_CONFIG_MAX_STRINGS];
+    // Setup parser layout from board_config - using STATIC array
     uint8_t num_strings = 0;
     for (int i = 0; i < BOARD_CONFIG_MAX_STRINGS; i++) {
-        string_lengths[i] = board_config_get_pixel_count(i);
-        if (string_lengths[i] > 0) {
+        g_string_lengths[i] = board_config_get_pixel_count(i);
+        if (g_string_lengths[i] > 0) {
             num_strings = i + 1;
         }
     }
 
     fseq_layout_t layout = {
         .num_strings = num_strings,
-        .string_lengths = string_lengths,
+        .string_lengths = g_string_lengths,  // Points to static array - safe!
     };
 
     // Initialize parser
-    fseq_parser_ctx_t *parser = fseq_parser_init(ctx, pixel_callback, layout);
-    if (!parser) {
-        printf("FSEQ Core1: Failed to init parser\n");
+    g_parser = fseq_parser_init(ctx, pixel_callback, layout);
+    if (!g_parser) {
+        printf("FSEQ: Failed to init parser\n");
         f_close(&g_fseq_file);
         g_file_open = false;
-        ctx->running = false;
-        return;
+        return false;
     }
 
     // Parse header
-    fseq_header_t header;
-    if (!fseq_parser_read_header(parser, header_buf, &header)) {
-        printf("FSEQ Core1: Invalid FSEQ header\n");
-        fseq_parser_deinit(parser);
+    if (!fseq_parser_read_header(g_parser, header_buf, &g_header)) {
+        printf("FSEQ: Invalid FSEQ header\n");
+        fseq_parser_deinit(g_parser);
+        g_parser = NULL;
         f_close(&g_fseq_file);
         g_file_open = false;
-        ctx->running = false;
-        return;
+        return false;
     }
 
-    printf("FSEQ: %lu frames @ %d fps\n",
-           (unsigned long)header.frame_count,
-           header.step_time_ms > 0 ? 1000 / header.step_time_ms : 0);
+    printf("FSEQ: %s - %lu frames @ %d fps\n",
+           ctx->filename,
+           (unsigned long)g_header.frame_count,
+           g_header.step_time_ms > 0 ? 1000 / g_header.step_time_ms : 0);
 
     // Calculate target FPS from step_time_ms
-    ctx->target_fps = header.step_time_ms > 0 ? (1000 / header.step_time_ms) : 30;
+    ctx->target_fps = g_header.step_time_ms > 0 ? (1000 / g_header.step_time_ms) : 30;
 
     // Seek to channel data
-    fr = f_lseek(&g_fseq_file, header.channel_data_offset);
+    fr = f_lseek(&g_fseq_file, g_header.channel_data_offset);
     if (fr != FR_OK) {
-        printf("FSEQ Core1: Failed to seek to data\n");
-        fseq_parser_deinit(parser);
+        printf("FSEQ: Failed to seek to data\n");
+        fseq_parser_deinit(g_parser);
+        g_parser = NULL;
         f_close(&g_fseq_file);
         g_file_open = false;
-        ctx->running = false;
+        return false;
+    }
+
+    ctx->fps = 0;
+    ctx->running = true;
+
+    printf("FSEQ: Playback started\n");
+    return true;
+}
+
+void fseq_player_run_loop(fseq_player_t *ctx, fseq_stop_check_fn stop_check) {
+    if (!ctx || !ctx->running || !g_parser) {
+        printf("FSEQ: run_loop early exit (ctx=%p, running=%d, parser=%p)\n",
+               ctx, ctx ? ctx->running : 0, g_parser);
         return;
     }
 
-    // Playback loop - read exactly one frame at a time for proper timing
-    uint32_t frame_size = header.channel_count;
-    uint8_t buffer[512];  // Max frame size we support
+    printf("FSEQ: run_loop starting, channel_count=%lu\n", (unsigned long)g_header.channel_count);
+
+    // Playback loop - read in chunks, parser handles frame boundaries
+    uint32_t frame_size = g_header.channel_count;
+    uint8_t buffer[512];
     if (frame_size > sizeof(buffer)) frame_size = sizeof(buffer);
 
     uint32_t frames_played = 0;
     uint32_t fps_frame_count = 0;
     uint64_t last_fps_time = time_us_64();
+    UINT bytes_read;
+    FRESULT fr;
+
+    printf("FSEQ: Entering playback loop, frame_size=%lu\n", (unsigned long)frame_size);
 
     while (true) {
-        __dmb();  // Ensure we see latest flag value from Core0
-        if (!fseq_core1_running || ctx->stop_requested) {
+        // Check if we should stop
+        if (stop_check && stop_check()) {
+            printf("FSEQ: Stop requested, exiting loop\n");
             break;
         }
 
         // Loop based on header frame count, not EOF
-        if (frames_played >= header.frame_count) {
-            ctx->loop_count++;  // Signal that sequence completed
-            f_lseek(&g_fseq_file, header.channel_data_offset);
-            fseq_parser_reset(parser);
+        if (frames_played >= g_header.frame_count) {
+            // Notify that we completed a loop (for auto-advance)
+            core1_notify_fseq_loop();
+
+            f_lseek(&g_fseq_file, g_header.channel_data_offset);
+            fseq_parser_reset(g_parser);
             frames_played = 0;
             continue;
         }
@@ -290,22 +258,29 @@ void fseq_player_core1_entry(void) {
         fr = f_read(&g_fseq_file, buffer, frame_size, &bytes_read);
         if (fr != FR_OK || bytes_read < frame_size) {
             // Unexpected EOF or error - loop back
-            f_lseek(&g_fseq_file, header.channel_data_offset);
-            fseq_parser_reset(parser);
+            printf("FSEQ: Read error or EOF, looping (fr=%d, bytes=%u)\n", fr, bytes_read);
+            f_lseek(&g_fseq_file, g_header.channel_data_offset);
+            fseq_parser_reset(g_parser);
             frames_played = 0;
             continue;
         }
 
         // Check for stop request after potentially slow SD read
-        __dmb();
-        if (!fseq_core1_running || ctx->stop_requested) {
+        if (stop_check && stop_check()) {
+            printf("FSEQ: Stop after SD read\n");
             break;
         }
 
         // Push data to parser
-        bool frame_complete = fseq_parser_push(parser, buffer, bytes_read);
+        if (frames_played == 0 && fps_frame_count == 0) {
+            printf("FSEQ: First read OK, pushing to parser\n");
+        }
+        bool frame_complete = fseq_parser_push(g_parser, buffer, bytes_read);
 
         if (frame_complete) {
+            if (frames_played == 0) {
+                printf("FSEQ: First frame complete, calling show\n");
+            }
             // Output the frame with FPS limiting
             pb_show_with_fps(ctx->driver, ctx->target_fps);
             frames_played++;
@@ -320,19 +295,54 @@ void fseq_player_core1_entry(void) {
             }
         }
     }
+}
 
-    printf("FSEQ Core1: Stopping playback\n");
+void fseq_player_cleanup(fseq_player_t *ctx) {
+    if (!ctx) return;
 
-    // Cleanup
-    fseq_parser_deinit(parser);
-    f_close(&g_fseq_file);
-    g_file_open = false;
+    printf("FSEQ: Cleaning up (keeping driver)\n");
 
-    // Clear LEDs and destroy driver to free PIO
-    pb_clear_all(ctx->driver, 0x000000);
-    pb_show(ctx->driver);
-    destroy_driver(ctx);
+    // Clean up parser
+    if (g_parser) {
+        fseq_parser_deinit(g_parser);
+        g_parser = NULL;
+    }
+
+    // Close file
+    if (g_file_open) {
+        f_close(&g_fseq_file);
+        g_file_open = false;
+    }
+
+    // Clear LEDs but keep driver for fast file switching
+    if (ctx->driver) {
+        pb_show_wait(ctx->driver);      // Wait for any previous DMA
+        pb_clear_all(ctx->driver, 0x000000);
+        pb_show(ctx->driver);           // Start DMA to output cleared frame
+        pb_show_wait(ctx->driver);      // Wait for DMA to complete
+    }
 
     ctx->running = false;
-    printf("FSEQ Core1: Playback stopped\n");
+}
+
+void fseq_player_shutdown(fseq_player_t *ctx) {
+    if (!ctx) return;
+
+    // Clean up file/parser first
+    fseq_player_cleanup(ctx);
+
+    // Now destroy driver
+    if (ctx->driver) {
+        destroy_driver(ctx);
+    }
+
+    printf("FSEQ: Shutdown complete\n");
+}
+
+bool fseq_player_is_running(const fseq_player_t *ctx) {
+    return ctx && ctx->running;
+}
+
+uint16_t fseq_player_get_fps(const fseq_player_t *ctx) {
+    return ctx ? ctx->fps : 0;
 }

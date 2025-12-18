@@ -1,4 +1,5 @@
 #include "flash_settings.h"
+#include "core1_task.h"
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include "pico/stdlib.h"
@@ -110,10 +111,6 @@ static void do_flash_write_callback(void* param) {
     flash_range_program(FLASH_SETTINGS_OFFSET, p->page_buffer, FLASH_PAGE_SIZE);
 }
 
-// Check if core1 is running (extern from main.c)
-extern volatile bool rainbow_core1_running;
-extern volatile bool fseq_core1_running;
-
 void flash_settings_save(const flash_settings_t* settings) {
     if (!settings) return;
 
@@ -129,8 +126,8 @@ void flash_settings_save(const flash_settings_t* settings) {
     memset(page_buffer, 0xFF, FLASH_PAGE_SIZE);
     memcpy(page_buffer, &to_write, sizeof(flash_settings_t));
 
-    // Check if core1 is running
-    bool core1_active = rainbow_core1_running || fseq_core1_running;
+    // Check if core1 is running a task
+    bool core1_active = !core1_is_idle();
 
     if (core1_active) {
         // Core1 is running - need to use flash_safe_execute to pause it
@@ -165,7 +162,7 @@ static void do_flash_erase_direct(void) {
 }
 
 void flash_settings_clear(void) {
-    bool core1_active = rainbow_core1_running || fseq_core1_running;
+    bool core1_active = !core1_is_idle();
 
     if (core1_active) {
         int rc = flash_safe_execute(do_flash_erase_callback, NULL, UINT32_MAX);
