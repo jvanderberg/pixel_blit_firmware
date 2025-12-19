@@ -123,11 +123,6 @@ bool fseq_player_start(fseq_player_t *ctx, const char *filename) {
         return false;
     }
 
-    // Clear any leftover pixel data from previous file
-    if (ctx->driver) {
-        pb_clear_all(ctx->driver, 0x000000);
-    }
-
     // Copy filename
     strncpy(ctx->filename, filename, sizeof(ctx->filename) - 1);
     ctx->filename[sizeof(ctx->filename) - 1] = '\0';
@@ -235,12 +230,18 @@ void fseq_player_run_loop(fseq_player_t *ctx, fseq_stop_check_fn stop_check) {
     UINT bytes_read;
     FRESULT fr;
 
-    printf("FSEQ: Entering playback loop, frame_size=%lu\n", (unsigned long)frame_size);
+    printf("FSEQ: Entering playback loop, frame_size=%lu, channel_count=%lu\n",
+           (unsigned long)frame_size, (unsigned long)g_header.channel_count);
+
+    uint32_t read_count = 0;
+    uint32_t total_bytes_read = 0;
 
     while (true) {
         // Check if we should stop
         if (stop_check && stop_check()) {
-            printf("FSEQ: Stop requested, exiting loop\n");
+            printf("FSEQ: Stop requested after %lu reads, %lu bytes, %lu frames\n",
+                   (unsigned long)read_count, (unsigned long)total_bytes_read,
+                   (unsigned long)frames_played);
             break;
         }
 
@@ -252,6 +253,8 @@ void fseq_player_run_loop(fseq_player_t *ctx, fseq_stop_check_fn stop_check) {
             f_lseek(&g_fseq_file, g_header.channel_data_offset);
             fseq_parser_reset(g_parser);
             frames_played = 0;
+            read_count = 0;
+            total_bytes_read = 0;
             continue;
         }
 
@@ -262,29 +265,40 @@ void fseq_player_run_loop(fseq_player_t *ctx, fseq_stop_check_fn stop_check) {
             f_lseek(&g_fseq_file, g_header.channel_data_offset);
             fseq_parser_reset(g_parser);
             frames_played = 0;
+            read_count = 0;
+            total_bytes_read = 0;
             continue;
         }
 
+        read_count++;
+        total_bytes_read += bytes_read;
+
         // Check for stop request after potentially slow SD read
         if (stop_check && stop_check()) {
-            printf("FSEQ: Stop after SD read\n");
+            printf("FSEQ: Stop after SD read (%lu reads, %lu bytes)\n",
+                   (unsigned long)read_count, (unsigned long)total_bytes_read);
             break;
         }
 
         // Push data to parser
-        if (frames_played == 0 && fps_frame_count == 0) {
-            printf("FSEQ: First read OK, pushing to parser\n");
-        }
         bool frame_complete = fseq_parser_push(g_parser, buffer, bytes_read);
 
         if (frame_complete) {
-            if (frames_played == 0) {
-                printf("FSEQ: First frame complete, calling show\n");
+            // Debug: log frame completion with byte counts
+            if (frames_played < 3) {  // Only log first few frames
+                printf("FSEQ: Frame %lu complete after %lu reads (%lu bytes)\n",
+                       (unsigned long)frames_played, (unsigned long)read_count,
+                       (unsigned long)total_bytes_read);
             }
+
             // Output the frame with FPS limiting
             pb_show_with_fps(ctx->driver, ctx->target_fps);
             frames_played++;
             fps_frame_count++;
+
+            // Reset per-frame counters
+            read_count = 0;
+            total_bytes_read = 0;
 
             // Update FPS every second
             uint64_t now = time_us_64();
