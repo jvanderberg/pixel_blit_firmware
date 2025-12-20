@@ -23,7 +23,7 @@ impl Default for BoardConfig {
         Self {
             strings: [StringConfig {
                 pixel_count: 50,
-                color_order: ColorOrder::GRB,
+                color_order: ColorOrder::RGB,
             }; MAX_STRINGS],
             string_count: MAX_STRINGS as u8,
             max_pixel_count: 50,
@@ -138,7 +138,7 @@ pub fn parse_config_line(line: &str) -> Option<StringConfig> {
     if line == "0" || line.starts_with("0,") || line.starts_with("0 ") {
         return Some(StringConfig {
             pixel_count: 0,
-            color_order: ColorOrder::GRB,
+            color_order: ColorOrder::default(),
         });
     }
 
@@ -415,7 +415,7 @@ mod tests {
         assert_eq!(ColorOrder::parse("grb"), ColorOrder::GRB);
         assert_eq!(ColorOrder::parse("BGR"), ColorOrder::BGR);
         assert_eq!(ColorOrder::parse("  GRB  "), ColorOrder::GRB);
-        assert_eq!(ColorOrder::parse("invalid"), ColorOrder::GRB); // default
+        assert_eq!(ColorOrder::parse("invalid"), ColorOrder::RGB); // default
     }
 
     #[test]

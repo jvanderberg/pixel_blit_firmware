@@ -71,8 +71,8 @@ impl MenuEntry {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u8)]
 pub enum ColorOrder {
-    #[default]
     GRB,
+    #[default]
     RGB,
     BGR,
     RBG,
