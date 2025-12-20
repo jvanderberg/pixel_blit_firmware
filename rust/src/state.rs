@@ -66,8 +66,10 @@ impl MenuEntry {
     }
 }
 
-/// Color order for LED strings
+/// Color order for LED strings.
+/// `#[repr(u8)]` for predictable size when embedded in repr(C) structs.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(u8)]
 pub enum ColorOrder {
     #[default]
     GRB,
@@ -185,7 +187,7 @@ pub const NUM_STRINGS: usize = 32;
 pub const MAX_PIXELS_PER_STRING: u16 = 512;
 
 /// Main application state
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct AppState {
     // Power
     pub is_powered_on: bool,

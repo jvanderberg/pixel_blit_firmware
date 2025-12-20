@@ -14,8 +14,17 @@ impl MainMenuView {
     }
 
     pub fn render_to<D: Display>(&mut self, display: &mut D, state: &AppState) {
-        // Title
-        display.text("Pixel Blit", 28, 10);
+        // Title with uptime on the right
+        display.text("Pixel Blit", 4, 10);
+
+        // Format uptime as H:MM:SS (compact to fit)
+        let secs = state.uptime_seconds;
+        let hours = secs / 3600;
+        let mins = (secs % 3600) / 60;
+        let s = secs % 60;
+        let mut uptime: String<12> = String::new();
+        write!(uptime, "{}:{:02}:{:02}", hours, mins, s).ok();
+        display.text(&uptime, 80, 10);
 
         // Menu items (show 5 at a time with scrolling window)
         let selected_idx = state.menu_selection.index();

@@ -3,10 +3,9 @@
 
 mod usb;
 
-use core::sync::atomic::{AtomicU8, AtomicU16, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_rp::flash::Flash;
 use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::i2c::{self, Config as I2cConfig, I2c};
 use embassy_rp::peripherals::{I2C1, PIO1, SPI0, USB};
@@ -24,7 +23,7 @@ use {defmt_rtt as _, panic_probe as _};
 // Import from library
 use pixel_blit::action::Action;
 use pixel_blit::display::Sh1106Display;
-use pixel_blit::led_driver::{self, Frame, FrameGenerator};
+use pixel_blit::led_driver::{self, buffer, Frame, FrameGenerator, WriteToken};
 use pixel_blit::reducer::AppReducer;
 use pixel_blit::sdcard::hw::SdReader;
 use pixel_blit::sdcard::set_file_list;
@@ -46,6 +45,13 @@ static ACTION_CHANNEL: Channel<CriticalSectionRawMutex, Action, 4> = Channel::ne
 // ============================================================================
 
 /// Rainbow test generator - displays rainbow on selected string, red on others.
+///
+/// # Atomics Ordering
+///
+/// Uses `Relaxed` ordering because:
+/// 1. Single atomic values (not compound data) - no consistency between fields needed
+/// 2. Visual display tolerates brief inconsistencies (self-corrects next frame)
+/// 3. Embassy's single-threaded executor provides implicit synchronization points
 pub struct RainbowGenerator {
     current_string: AtomicU8,
     hue_offset: AtomicU8,
@@ -88,29 +94,36 @@ impl FrameGenerator for RainbowGenerator {
 }
 
 /// String length generator - lights a single pixel on selected string.
+///
+/// # Atomics Ordering
+///
+/// Uses a single `AtomicU32` to pack both string (bits 16-23) and pixel (bits 0-15)
+/// for atomic updates. `Relaxed` ordering is sufficient since we only need
+/// single-value atomicity, not cross-thread synchronization.
 pub struct StringLengthGenerator {
-    current_string: AtomicU8,
-    current_pixel: AtomicU16,
+    /// Packed position: bits 16-23 = string (u8), bits 0-15 = pixel (u16)
+    position: AtomicU32,
 }
 
 impl StringLengthGenerator {
     pub const fn new() -> Self {
+        // Default: string=0, pixel=1
         Self {
-            current_string: AtomicU8::new(0),
-            current_pixel: AtomicU16::new(1),
+            position: AtomicU32::new(1),
         }
     }
 
     pub fn set_position(&self, string: u8, pixel: u16) {
-        self.current_string.store(string, Ordering::Relaxed);
-        self.current_pixel.store(pixel, Ordering::Relaxed);
+        let packed = ((string as u32) << 16) | (pixel as u32);
+        self.position.store(packed, Ordering::Relaxed);
     }
 }
 
 impl FrameGenerator for StringLengthGenerator {
     fn generate(&self, frame: &mut Frame) {
-        let string = self.current_string.load(Ordering::Relaxed);
-        let pixel = self.current_pixel.load(Ordering::Relaxed);
+        let packed = self.position.load(Ordering::Relaxed);
+        let string = (packed >> 16) as u8;
+        let pixel = (packed & 0xFFFF) as u16;
 
         // String length test uses RGB order
         frame.set_uniform_config(pixel + 1, pixel_blit::state::ColorOrder::RGB);
@@ -150,6 +163,18 @@ async fn button_select_task(mut btn: Input<'static>) {
         ACTION_CHANNEL.send(Action::ButtonSelect).await;
         // Debounce: wait before accepting next press
         Timer::after_millis(200).await;
+    }
+}
+
+// ============================================================================
+// Timer Tick Task
+// ============================================================================
+
+#[embassy_executor::task]
+async fn tick_task() {
+    loop {
+        Timer::after_secs(1).await;
+        ACTION_CHANNEL.send(Action::Tick1s).await;
     }
 }
 
@@ -248,6 +273,8 @@ async fn sd_card_task(
                 ACTION_CHANNEL.send(Action::SdCardError {
                     message: e.message(),
                 }).await;
+                // Brief delay before accepting next rescan to prevent rapid retries
+                Timer::after_millis(500).await;
             }
         }
         // SPI/CS dropped here, peripherals can be reused
@@ -263,48 +290,15 @@ async fn sd_card_task(
 // ============================================================================
 
 
-/// Struct to hold all 32 LED output pins
-pub struct LedPins {
-    pub pin0: Peri<'static, embassy_rp::peripherals::PIN_0>,
-    pub pin1: Peri<'static, embassy_rp::peripherals::PIN_1>,
-    pub pin2: Peri<'static, embassy_rp::peripherals::PIN_2>,
-    pub pin3: Peri<'static, embassy_rp::peripherals::PIN_3>,
-    pub pin4: Peri<'static, embassy_rp::peripherals::PIN_4>,
-    pub pin5: Peri<'static, embassy_rp::peripherals::PIN_5>,
-    pub pin6: Peri<'static, embassy_rp::peripherals::PIN_6>,
-    pub pin7: Peri<'static, embassy_rp::peripherals::PIN_7>,
-    pub pin8: Peri<'static, embassy_rp::peripherals::PIN_8>,
-    pub pin9: Peri<'static, embassy_rp::peripherals::PIN_9>,
-    pub pin10: Peri<'static, embassy_rp::peripherals::PIN_10>,
-    pub pin11: Peri<'static, embassy_rp::peripherals::PIN_11>,
-    pub pin12: Peri<'static, embassy_rp::peripherals::PIN_12>,
-    pub pin13: Peri<'static, embassy_rp::peripherals::PIN_13>,
-    pub pin14: Peri<'static, embassy_rp::peripherals::PIN_14>,
-    pub pin15: Peri<'static, embassy_rp::peripherals::PIN_15>,
-    pub pin16: Peri<'static, embassy_rp::peripherals::PIN_16>,
-    pub pin17: Peri<'static, embassy_rp::peripherals::PIN_17>,
-    pub pin18: Peri<'static, embassy_rp::peripherals::PIN_18>,
-    pub pin19: Peri<'static, embassy_rp::peripherals::PIN_19>,
-    pub pin20: Peri<'static, embassy_rp::peripherals::PIN_20>,
-    pub pin21: Peri<'static, embassy_rp::peripherals::PIN_21>,
-    pub pin22: Peri<'static, embassy_rp::peripherals::PIN_22>,
-    pub pin23: Peri<'static, embassy_rp::peripherals::PIN_23>,
-    pub pin24: Peri<'static, embassy_rp::peripherals::PIN_24>,
-    pub pin25: Peri<'static, embassy_rp::peripherals::PIN_25>,
-    pub pin26: Peri<'static, embassy_rp::peripherals::PIN_26>,
-    pub pin27: Peri<'static, embassy_rp::peripherals::PIN_27>,
-    pub pin28: Peri<'static, embassy_rp::peripherals::PIN_28>,
-    pub pin29: Peri<'static, embassy_rp::peripherals::PIN_29>,
-    pub pin30: Peri<'static, embassy_rp::peripherals::PIN_30>,
-    pub pin31: Peri<'static, embassy_rp::peripherals::PIN_31>,
-}
-
 /// LED output task - owns PIO and DMA, handles buffer swapping and output.
+///
+/// Note: GPIO 0-31 are configured for PIO output via direct register access
+/// in `LedOutput::new_parallel_32`. The pin Peri handles are consumed in main()
+/// to prevent reuse, but not passed here.
 #[embassy_executor::task]
 async fn led_output_task(
     pio1: Peri<'static, PIO1>,
     dma: Peri<'static, embassy_rp::peripherals::DMA_CH2>,
-    pins: LedPins,
 ) {
     // Let USB enumerate before doing anything
     Timer::after_millis(100).await;
@@ -319,7 +313,6 @@ async fn led_output_task(
 
     // Use direct register access for 32 pins (avoids stack overflow)
     let output = led_driver::LedOutput::new_parallel_32(&mut common, sm0);
-    let _ = pins;  // pins are configured directly via registers
     usb_println!("LED Output: running output loop");
 
     // Run the output loop forever
@@ -329,11 +322,11 @@ async fn led_output_task(
 /// LED runner task - runs the generator loop.
 /// Generators are swapped via led_driver::set_generator() from main loop.
 #[embassy_executor::task]
-async fn led_runner_task() {
+async fn led_runner_task(token: WriteToken) {
     usb_println!("LED Runner: starting");
     Timer::after_millis(100).await;
     usb_println!("LED Runner: entering run loop");
-    led_driver::run().await
+    led_driver::run(token).await
 }
 
 // ============================================================================
@@ -354,22 +347,36 @@ async fn main(spawner: Spawner) {
     usb_println!("Pixel Blit Firmware starting...");
 
     // Initialize persistence (loads state, spawns save task)
-    let flash = Flash::new_blocking(p.FLASH);
-    let (mut settings, state) = Settings::init(flash, &spawner);
+    // Uses DMA_CH3 for flash operations
+    let (mut settings, state) = Settings::init(p.FLASH, p.DMA_CH3, &spawner);
     usb_println!("Settings loaded: brightness={}", state.brightness_level);
 
     // Set up buttons (active low with pull-up) and spawn ISR tasks
     info!("Spawning button tasks...");
     let btn_next = Input::new(p.PIN_45, Pull::Up);
     let btn_select = Input::new(p.PIN_43, Pull::Up);
-    spawner.spawn(button_next_task(btn_next).unwrap());
-    spawner.spawn(button_select_task(btn_select).unwrap());
+    match button_next_task(btn_next) {
+        Ok(token) => spawner.spawn(token),
+        Err(e) => defmt::error!("Failed to spawn button_next_task: {:?}", e),
+    }
+    match button_select_task(btn_select) {
+        Ok(token) => spawner.spawn(token),
+        Err(e) => defmt::error!("Failed to spawn button_select_task: {:?}", e),
+    }
     info!("Button tasks spawned");
+
+    // Spawn tick task for uptime tracking
+    info!("Spawning tick task...");
+    match tick_task() {
+        Ok(token) => spawner.spawn(token),
+        Err(e) => defmt::error!("Failed to spawn tick_task: {:?}", e),
+    }
+    info!("Tick task spawned");
 
     // SPI0 for SD card on GPIO 36-39
     // MISO=36, CS=37, SCK=38, MOSI=39
     info!("Spawning SD card task...");
-    spawner.spawn(sd_card_task(
+    match sd_card_task(
         p.SPI0,
         p.PIN_38, // SCK
         p.PIN_39, // MOSI
@@ -378,27 +385,39 @@ async fn main(spawner: Spawner) {
         p.DMA_CH0,
         p.DMA_CH1,
         state.board_id,
-    ).unwrap());
+    ) {
+        Ok(token) => spawner.spawn(token),
+        Err(e) => defmt::error!("Failed to spawn sd_card_task: {:?}", e),
+    }
     info!("SD card task spawned");
 
+    // Initialize LED buffer system (returns first WriteToken)
+    info!("Initializing LED buffer system...");
+    let led_token = buffer::init();
+    info!("LED buffer initialized");
+
     // Spawn LED output task (owns PIO/DMA, handles async output)
+    // Note: GPIO 0-31 Peri handles must be consumed to prevent reuse.
+    // The task configures them via PAC (direct register access).
     info!("Spawning LED output task...");
-    let led_pins = LedPins {
-        pin0: p.PIN_0, pin1: p.PIN_1, pin2: p.PIN_2, pin3: p.PIN_3,
-        pin4: p.PIN_4, pin5: p.PIN_5, pin6: p.PIN_6, pin7: p.PIN_7,
-        pin8: p.PIN_8, pin9: p.PIN_9, pin10: p.PIN_10, pin11: p.PIN_11,
-        pin12: p.PIN_12, pin13: p.PIN_13, pin14: p.PIN_14, pin15: p.PIN_15,
-        pin16: p.PIN_16, pin17: p.PIN_17, pin18: p.PIN_18, pin19: p.PIN_19,
-        pin20: p.PIN_20, pin21: p.PIN_21, pin22: p.PIN_22, pin23: p.PIN_23,
-        pin24: p.PIN_24, pin25: p.PIN_25, pin26: p.PIN_26, pin27: p.PIN_27,
-        pin28: p.PIN_28, pin29: p.PIN_29, pin30: p.PIN_30, pin31: p.PIN_31,
-    };
-    spawner.spawn(led_output_task(p.PIO1, p.DMA_CH2, led_pins).unwrap());
+    drop((
+        p.PIN_0, p.PIN_1, p.PIN_2, p.PIN_3, p.PIN_4, p.PIN_5, p.PIN_6, p.PIN_7,
+        p.PIN_8, p.PIN_9, p.PIN_10, p.PIN_11, p.PIN_12, p.PIN_13, p.PIN_14, p.PIN_15,
+        p.PIN_16, p.PIN_17, p.PIN_18, p.PIN_19, p.PIN_20, p.PIN_21, p.PIN_22, p.PIN_23,
+        p.PIN_24, p.PIN_25, p.PIN_26, p.PIN_27, p.PIN_28, p.PIN_29, p.PIN_30, p.PIN_31,
+    ));
+    match led_output_task(p.PIO1, p.DMA_CH2) {
+        Ok(token) => spawner.spawn(token),
+        Err(e) => defmt::error!("Failed to spawn led_output_task: {:?}", e),
+    }
     info!("LED output task spawned");
 
     // Spawn LED runner task (handles swappable generators)
     info!("Spawning LED runner task...");
-    spawner.spawn(led_runner_task().unwrap());
+    match led_runner_task(led_token) {
+        Ok(token) => spawner.spawn(token),
+        Err(e) => defmt::error!("Failed to spawn led_runner_task: {:?}", e),
+    }
     info!("LED runner task spawned");
 
     // I2C1 on GPIO 46 (SDA) and GPIO 47 (SCL)

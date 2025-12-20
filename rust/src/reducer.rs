@@ -132,7 +132,7 @@ impl Reducer for AppReducer {
                 ..state
             }),
 
-            Action::SdCardError { message: _ } => changed(AppState {
+            Action::SdCardError { message } => changed(AppState {
                 sd_card: SdCardState {
                     mounted: false,
                     file_count: 0,
@@ -140,7 +140,7 @@ impl Reducer for AppReducer {
                     ..state.sd_card
                 },
                 boot_state: BootState::Error,
-                boot_error: Some("No SD card"),
+                boot_error: Some(message),
                 ..state
             }),
 
