@@ -459,6 +459,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_config_buffer_board_not_found() {
+        // Config only has data for board 0 (3 lines), but we request board 5
+        let csv = "50,GRB\n100,RGB\n0\n";
+        let config = parse_config_buffer(csv, 5).unwrap();
+
+        // All strings should have the default value (50px from BoardConfig::default)
+        for i in 0..32 {
+            assert_eq!(
+                config.strings[i].pixel_count, 50,
+                "String {} should be 50px but was {}px",
+                i, config.strings[i].pixel_count
+            );
+        }
+        assert_eq!(config.max_pixel_count, 0); // No strings were configured
+        assert_eq!(config.string_count, 0);
+    }
+
+    #[test]
     fn is_fseq_file_check() {
         assert!(is_fseq_file("test.fseq"));
         assert!(is_fseq_file("TEST.FSEQ"));
