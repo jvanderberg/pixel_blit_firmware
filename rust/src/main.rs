@@ -92,6 +92,10 @@ impl FrameGenerator for RainbowGenerator {
             }
         }
     }
+
+    fn target_fps(&self) -> u16 {
+        60
+    }
 }
 
 /// String length generator - lights a single pixel on selected string.
@@ -176,6 +180,9 @@ async fn tick_task() {
     loop {
         Timer::after_secs(1).await;
         ACTION_CHANNEL.send(Action::Tick1s).await;
+        // Update FPS display (reducer ignores if not powered on)
+        let fps = led_driver::get_measured_fps();
+        ACTION_CHANNEL.send(Action::RainbowFrameComplete { fps }).await;
     }
 }
 

@@ -3,51 +3,62 @@
 //! The runner loop is always active but generators can be swapped at runtime.
 //! When no generator is set, the driver idles (no DMA output).
 //!
+//! # Architecture
+//!
+//! Uses a token-based ownership system:
+//! - Runner holds a `WriteToken`, writes pixels directly to the buffer
+//! - When frame is ready, converts to `ReadToken` and sends to output
+//! - Output does DMA, then returns a `WriteToken` for the next buffer
+//!
 //! # Example
 //!
 //! ```ignore
 //! // Define a generator
 //! static RAINBOW: RainbowGenerator = RainbowGenerator::new();
 //!
-//! // Start the runner (spawns as a task)
-//! spawner.spawn(led_runner_task()).unwrap();
+//! // Initialize buffer system (returns first WriteToken)
+//! let token = buffer::init();
+//!
+//! // Spawn the runner task with the initial token
+//! spawner.spawn(led_runner_task(token)).unwrap();
 //!
 //! // Later, activate the generator
 //! led_driver::set_generator(Some(&RAINBOW));
-//!
-//! // When done, deactivate
-//! led_driver::set_generator(None);
 //! ```
 
+use core::cell::RefCell;
+use core::sync::atomic::{AtomicU16, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 
-use core::cell::RefCell;
-
-use super::buffer::{LedBuffer, StringConfig};
-
-/// Signal from writer to DMA task: frame is ready to show
-static FRAME_READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-
-/// Signal from DMA task to writer: back buffer is free
-static BUFFER_FREE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-
-/// Shared LED buffer (static for cross-task access)
-static mut LED_BUFFER: LedBuffer = LedBuffer::new();
+use super::buffer::{
+    FrameData, FrameStringConfig, WriteToken,
+    FRAME_CHANNEL, FREE_CHANNEL,
+};
 
 /// Current frame generator (protected by mutex for atomic swap)
 static CURRENT_GENERATOR: Mutex<CriticalSectionRawMutex, RefCell<Option<&'static dyn FrameGenerator>>> =
     Mutex::new(RefCell::new(None));
 
+/// Measured FPS (updated every second by runner)
+static MEASURED_FPS: AtomicU16 = AtomicU16::new(0);
+
+/// Get the current measured FPS.
+///
+/// Returns the actual FPS achieved by the active generator.
+/// Returns 0 when no generator is active.
+pub fn get_measured_fps() -> u16 {
+    MEASURED_FPS.load(Ordering::Relaxed)
+}
+
 /// Trait for frame generators.
 ///
 /// Implement this for each animation type. Generators are stateless
-/// or manage their own state internally.
+/// or manage their own state internally via atomics.
 pub trait FrameGenerator: Sync {
     /// Generate a frame. Called once per frame when active.
-    fn generate(&self, frame: &mut Frame);
+    fn generate(&self, frame: &mut Frame<'_>);
 
     /// Target FPS for this generator.
     fn target_fps(&self) -> u16 {
@@ -65,7 +76,6 @@ pub fn set_generator(gen: Option<&'static dyn FrameGenerator>) {
     });
 }
 
-
 /// Get the current generator (if any).
 fn current_generator() -> Option<&'static dyn FrameGenerator> {
     CURRENT_GENERATOR.lock(|cell| *cell.borrow())
@@ -73,70 +83,42 @@ fn current_generator() -> Option<&'static dyn FrameGenerator> {
 
 /// Frame handle passed to generators.
 ///
-/// Provides safe access to the back buffer for writing pixels.
+/// Provides safe access to the frame buffer for writing pixels.
 pub struct Frame<'a> {
-    buffer: &'a mut LedBuffer,
+    data: &'a mut FrameData,
 }
 
 impl<'a> Frame<'a> {
     /// Set a pixel color for a specific string.
     #[inline]
     pub fn set_pixel(&mut self, string: u8, pixel: u16, color: super::Rgb) {
-        self.buffer.set_pixel(string, pixel, color);
+        self.data.set_pixel(string, pixel, color);
     }
 
     /// Clear all pixels to black.
     pub fn clear(&mut self) {
-        self.buffer.clear();
+        self.data.clear();
     }
 
     /// Set all strings to same length and color order.
     pub fn set_uniform_config(&mut self, length: u16, color_order: crate::state::ColorOrder) {
-        self.buffer.set_uniform_config(length, color_order);
+        self.data.set_uniform_config(length, color_order);
     }
 
     /// Configure a single string.
-    pub fn set_string_config(&mut self, string: u8, config: StringConfig) {
-        self.buffer.set_string_config(string, config);
+    pub fn set_string_config(&mut self, string: u8, config: FrameStringConfig) {
+        self.data.set_string_config(string, config);
     }
 
     /// Get the max pixel count across all strings.
     pub fn max_length(&self) -> u16 {
-        self.buffer.max_length()
+        self.data.max_length()
     }
 
     /// Get config for a specific string.
-    pub fn string_config(&self, string: u8) -> StringConfig {
-        self.buffer.string_config(string)
+    pub fn string_config(&self, string: u8) -> FrameStringConfig {
+        self.data.string_config(string)
     }
-}
-
-/// Get access to the shared buffer for the DMA task.
-///
-/// # Safety
-/// Only call from the DMA task after FRAME_READY signal.
-pub(super) unsafe fn get_buffer() -> &'static mut LedBuffer {
-    &mut *core::ptr::addr_of_mut!(LED_BUFFER)
-}
-
-/// Signal that the frame is ready (called by runner).
-pub(super) fn signal_frame_ready() {
-    FRAME_READY.signal(());
-}
-
-/// Wait for frame ready signal (called by DMA task).
-pub(super) async fn wait_frame_ready() {
-    FRAME_READY.wait().await;
-}
-
-/// Signal that buffer is free (called by DMA task).
-pub(super) fn signal_buffer_free() {
-    BUFFER_FREE.signal(());
-}
-
-/// Wait for buffer free signal (called by runner).
-pub(super) async fn wait_buffer_free() {
-    BUFFER_FREE.wait().await;
 }
 
 /// Run the LED driver loop.
@@ -144,65 +126,92 @@ pub(super) async fn wait_buffer_free() {
 /// This function runs forever, checking for an active generator each iteration.
 /// When a generator is set, it generates frames at the target FPS.
 /// When no generator is set, it idles without DMA output.
-pub async fn run() -> ! {
-
+///
+/// # Arguments
+/// * `initial_token` - The initial WriteToken from `buffer::init()`
+pub async fn run(initial_token: WriteToken) -> ! {
+    let mut token = initial_token;
     let mut last_frame_time: Option<Instant> = None;
     let mut was_active = false;
     let mut frame_count: u32 = 0;
+
+    // FPS measurement
+    let mut fps_frame_count: u32 = 0;
+    let mut fps_last_time: Option<Instant> = None;
 
     loop {
         if let Some(gen) = current_generator() {
             if !was_active {
                 defmt::info!("Runner: generator detected, starting");
+                fps_frame_count = 0;
+                fps_last_time = Some(Instant::now());
             }
 
             // Generator active - produce frames
             let frame_interval = Duration::from_micros(1_000_000 / gen.target_fps() as u64);
 
-            // Wait for back buffer to be free
-            defmt::trace!("Runner: waiting for buffer");
-            wait_buffer_free().await;
-            defmt::trace!("Runner: buffer free");
-
-            // Get access to buffer and create frame handle
-            let buffer = unsafe { get_buffer() };
-            let mut frame = Frame { buffer };
-
-            // Call generator
-            gen.generate(&mut frame);
+            // Get direct mutable access to buffer via token
+            {
+                let data = token.get_mut();
+                let mut frame = Frame { data };
+                gen.generate(&mut frame);
+            }
 
             frame_count = frame_count.wrapping_add(1);
-            if frame_count % 600 == 0 {
-                defmt::info!("Runner: frame {}", frame_count);
-            }
+            fps_frame_count += 1;
 
-            // FPS limiting
-            if let Some(last) = last_frame_time {
-                let target = last + frame_interval;
-                let now = Instant::now();
-                if now < target {
-                    Timer::after(target - now).await;
+            // Update FPS measurement every second
+            if let Some(fps_start) = fps_last_time {
+                let elapsed = Instant::now().duration_since(fps_start);
+                if elapsed.as_millis() >= 1000 {
+                    let fps = (fps_frame_count as u64 * 1000) / elapsed.as_millis();
+                    MEASURED_FPS.store(fps as u16, Ordering::Relaxed);
+                    fps_frame_count = 0;
+                    fps_last_time = Some(Instant::now());
                 }
             }
-            last_frame_time = Some(Instant::now());
 
-            // Signal DMA task
-            defmt::trace!("Runner: signaling frame ready");
-            signal_frame_ready();
+            // FPS limiting - wait before sending frame
+            let target_time = if let Some(last) = last_frame_time {
+                last + frame_interval
+            } else {
+                Instant::now()
+            };
+            let now = Instant::now();
+            if now < target_time {
+                Timer::after(target_time - now).await;
+            }
+            last_frame_time = Some(target_time); // Use target, not actual time (drift correction)
+
+            // Convert WriteToken to ReadToken and send to output task
+            let read_token = token.into_read_token();
+            defmt::trace!("Runner: sending frame to output");
+            FRAME_CHANNEL.send(read_token).await;
+
+            // Wait for a free buffer from output task
+            defmt::trace!("Runner: waiting for free buffer");
+            token = FREE_CHANNEL.receive().await;
+            defmt::trace!("Runner: got buffer {}", token.index());
+
             was_active = true;
         } else {
             // No generator - idle
             if was_active {
-                defmt::info!("Runner: generator removed, clearing");
-                // Clear LEDs on transition to idle
-                wait_buffer_free().await;
-                let buffer = unsafe { get_buffer() };
-                buffer.clear();
-                signal_frame_ready();
+                defmt::info!("Runner: generator removed, sending clear frame");
+
+                // Send one clear frame
+                token.get_mut().clear();
+
+                let read_token = token.into_read_token();
+                FRAME_CHANNEL.send(read_token).await;
+                token = FREE_CHANNEL.receive().await;
+
                 was_active = false;
                 frame_count = 0;
+                MEASURED_FPS.store(0, Ordering::Relaxed);
             }
             last_frame_time = None;
+            fps_last_time = None;
             Timer::after_millis(50).await;
         }
     }
