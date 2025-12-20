@@ -10,6 +10,7 @@ pub mod action;
 pub mod reducer;
 pub mod storage;
 pub mod sdcard;
+pub mod led_driver;
 
 // Display abstraction - always available, mock impl only in tests
 #[cfg(feature = "view-test")]

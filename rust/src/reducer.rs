@@ -288,8 +288,27 @@ fn reduce_button_select(state: AppState) -> Outcome<AppState> {
                 ..state
             })
         } else {
+            // Entering detail view - set run_state for LED menus
+            let rainbow_test = if state.menu_selection == MenuEntry::RainbowTest {
+                RainbowTestState {
+                    run_state: RunState::Running,
+                    ..state.rainbow_test
+                }
+            } else {
+                state.rainbow_test
+            };
+            let string_length = if state.menu_selection == MenuEntry::StringLength {
+                StringLengthState {
+                    run_state: RunState::Running,
+                    ..state.string_length
+                }
+            } else {
+                state.string_length
+            };
             changed(AppState {
                 in_detail_view: true,
+                rainbow_test,
+                string_length,
                 ..state
             })
         }
