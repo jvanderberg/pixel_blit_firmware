@@ -116,10 +116,19 @@ impl ColorOrder {
 }
 
 /// Configuration for a single LED string
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct StringConfig {
     pub pixel_count: u16,
     pub color_order: ColorOrder,
+}
+
+impl Default for StringConfig {
+    fn default() -> Self {
+        Self {
+            pixel_count: 50,
+            color_order: ColorOrder::default(),
+        }
+    }
 }
 
 /// Info view state
