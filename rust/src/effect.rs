@@ -12,8 +12,8 @@ pub enum AppEffect {
     /// State unchanged, skip render
     Unchanged,
 
-    /// State changed, render only
-    Render,
+    /// State changed, render only (no additional side effects)
+    None,
 
     /// Render + save settings to flash
     Save,
@@ -43,5 +43,9 @@ pub enum AppEffect {
 impl Effect for AppEffect {
     fn is_unchanged(&self) -> bool {
         matches!(self, AppEffect::Unchanged)
+    }
+
+    fn changed() -> Self {
+        AppEffect::None
     }
 }

@@ -458,7 +458,7 @@ async fn main(spawner: Spawner) {
                 // No state change, nothing to do
             }
 
-            AppEffect::Render => {
+            AppEffect::None => {
                 // State changed, view already rendered by App::dispatch
             }
 

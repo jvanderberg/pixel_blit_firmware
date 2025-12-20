@@ -20,7 +20,7 @@ mod tests {
     fn boot_triggers_render() {
         let mut state = AppState::default();
         let effect = dispatch(&mut state, Action::Boot);
-        assert_eq!(effect, AppEffect::Render);
+        assert_eq!(effect, AppEffect::None);
     }
 
     // =========================================================================
