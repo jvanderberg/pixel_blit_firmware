@@ -103,8 +103,4 @@ impl<D: Display> View for RootView<D> {
 
         self.display.flush().ok();
     }
-
-    fn text(&self) -> &str {
-        ""
-    }
 }
