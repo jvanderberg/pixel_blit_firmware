@@ -23,11 +23,12 @@ use {defmt_rtt as _, panic_probe as _};
 // Import from library
 use pixel_blit::action::Action;
 use pixel_blit::display::Sh1106Display;
+use pixel_blit::effect::AppEffect;
 use pixel_blit::led_driver::{self, buffer, Frame, FrameGenerator, WriteToken};
 use pixel_blit::reducer::AppReducer;
 use pixel_blit::sdcard::hw::SdReader;
 use pixel_blit::sdcard::set_file_list;
-use pixel_blit::state::{AppState, MenuEntry, RunState};
+use pixel_blit::state::AppState;
 use pixel_blit::storage::persist::Settings;
 use pixel_blit::views::RootView;
 
@@ -446,73 +447,72 @@ async fn main(spawner: Spawner) {
 
     usb_println!("Entering main loop");
 
-    // Main loop
+    // Main loop - dispatch actions and handle effects
     loop {
         let action = ACTION_CHANNEL.receive().await;
-        let result = app.dispatch(action);
+        let effect = app.dispatch(action);
 
-        if result.changed {
-            // Save settings
-            if settings.save_state(result.new) {
-                usb_println!("Saving: brightness={}, board={}",
-                    result.new.brightness_level, result.new.board_id);
+        // Handle effects - the reducer explicitly signals what side effects are needed
+        match effect {
+            AppEffect::Unchanged => {
+                // No state change, nothing to do
             }
 
-            // Log when config loads
-            use pixel_blit::state::BootState;
-            if result.new.boot_state == BootState::Ready
-                && result.old.boot_state != BootState::Ready
-            {
-                info!("Config loaded, string 0 color order: {:?}", defmt::Debug2Format(&result.new.strings[0].color_order));
+            AppEffect::Render => {
+                // State changed, view already rendered by App::dispatch
             }
 
-            // Trigger rescan when entering SD card menu
-            let entered_sd = result.new.in_detail_view
-                && result.new.menu_selection == MenuEntry::SdCard
-                && !result.old.in_detail_view;
-            if entered_sd {
-                usb_println!("SD: menu entered, triggering rescan");
-                SD_RESCAN_CHANNEL.try_send(result.new.board_id).ok();
-            }
-
-            // Swap generators based on run_state (single source of truth)
-            let rainbow_running = result.new.rainbow_test.run_state == RunState::Running;
-            let rainbow_was_running = result.old.rainbow_test.run_state == RunState::Running;
-            let string_length_running = result.new.string_length.run_state == RunState::Running;
-            let string_length_was_running = result.old.string_length.run_state == RunState::Running;
-
-            if rainbow_running && !rainbow_was_running {
-                // Rainbow just started
-                info!("Rainbow started, string={}", result.new.rainbow_test.current_string);
-                RAINBOW_GENERATOR.set_string(result.new.rainbow_test.current_string);
-                led_driver::set_generator(Some(&RAINBOW_GENERATOR));
-            } else if rainbow_running {
-                // Rainbow still running - update string if changed
-                if result.new.rainbow_test.current_string != result.old.rainbow_test.current_string {
-                    RAINBOW_GENERATOR.set_string(result.new.rainbow_test.current_string);
+            AppEffect::Save => {
+                // Save settings to flash
+                let state = app.state();
+                if settings.save_state(state) {
+                    usb_println!("Saving: brightness={}, board={}",
+                        state.brightness_level, state.board_id);
                 }
-            } else if !rainbow_running && rainbow_was_running {
-                // Rainbow just stopped
+            }
+
+            AppEffect::RainbowStart => {
+                let state = app.state();
+                info!("Rainbow started, string={}", state.rainbow_test.current_string);
+                RAINBOW_GENERATOR.set_string(state.rainbow_test.current_string);
+                led_driver::set_generator(Some(&RAINBOW_GENERATOR));
+            }
+
+            AppEffect::RainbowUpdate => {
+                let state = app.state();
+                RAINBOW_GENERATOR.set_string(state.rainbow_test.current_string);
+            }
+
+            AppEffect::RainbowStop => {
                 info!("Rainbow stopped");
                 led_driver::set_generator(None);
             }
 
-            if string_length_running && !string_length_was_running {
-                // String length just started
+            AppEffect::StringLengthStart => {
+                let state = app.state();
                 STRING_LENGTH_GENERATOR.set_position(
-                    result.new.string_length.current_string,
-                    result.new.string_length.current_pixel,
+                    state.string_length.current_string,
+                    state.string_length.current_pixel,
                 );
                 led_driver::set_generator(Some(&STRING_LENGTH_GENERATOR));
-            } else if string_length_running {
-                // String length still running - update position if changed
+            }
+
+            AppEffect::StringLengthUpdate => {
+                let state = app.state();
                 STRING_LENGTH_GENERATOR.set_position(
-                    result.new.string_length.current_string,
-                    result.new.string_length.current_pixel,
+                    state.string_length.current_string,
+                    state.string_length.current_pixel,
                 );
-            } else if !string_length_running && string_length_was_running {
-                // String length just stopped
+            }
+
+            AppEffect::StringLengthStop => {
                 led_driver::set_generator(None);
+            }
+
+            AppEffect::SdRescan => {
+                let state = app.state();
+                usb_println!("SD: triggering rescan for board {}", state.board_id);
+                SD_RESCAN_CHANNEL.try_send(state.board_id).ok();
             }
         }
     }
