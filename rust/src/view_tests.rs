@@ -392,7 +392,8 @@ mod tests {
             ..AppState::default()
         };
         view.render_to(&mut display, &state);
-        assert!(display.contains("PLAYING [AUTO]"));
+        assert!(display.contains("PLAYING"));
+        assert!(display.contains("[AUTO]"));
     }
 
     // =========================================================================

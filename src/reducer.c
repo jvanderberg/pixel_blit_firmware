@@ -155,7 +155,13 @@ static AppState handle_select_detail(const AppState* state) {
             return new_state;
         }
 
-        case MENU_BOARD_ADDRESS:
+        case MENU_BOARD_ADDRESS: {
+            // SELECT cycles through board IDs 0-15
+            AppState new_state = app_state_new_version(state);
+            new_state.board_id = (state->board_id + 1) % (BOARD_ID_MAX + 1);
+            return new_state;
+        }
+
         default: {
             // Exit detail view
             AppState new_state = app_state_new_version(state);
@@ -230,22 +236,6 @@ static AppState handle_button_next(const AppState* state) {
 static AppState handle_tick_1s(const AppState* state) {
     AppState new_state = app_state_new_version(state);
     new_state.uptime_seconds = state->uptime_seconds + 1;
-    return new_state;
-}
-
-// Handle board address update
-static AppState handle_board_address_updated(const AppState* state, const Action* action) {
-    // Only update if values actually changed
-    if (state->board_address.adc_value == action->payload.board_address.adc_value &&
-        state->board_address.code == action->payload.board_address.code) {
-        return *state;  // No change
-    }
-
-    AppState new_state = app_state_new_version(state);
-    new_state.board_address.adc_value = action->payload.board_address.adc_value;
-    new_state.board_address.code = action->payload.board_address.code;
-    new_state.board_address.error = action->payload.board_address.error;
-    new_state.board_address.margin = action->payload.board_address.margin;
     return new_state;
 }
 
@@ -406,6 +396,17 @@ static AppState handle_fseq_loop_complete(const AppState* state) {
     return *state;
 }
 
+// Handle FSEQ FPS update
+static AppState handle_fseq_fps_update(const AppState* state, const Action* action) {
+    if (state->sd_card.fps == action->payload.fseq_fps.fps) {
+        return *state;  // No change
+    }
+
+    AppState new_state = app_state_new_version(state);
+    new_state.sd_card.fps = action->payload.fseq_fps.fps;
+    return new_state;
+}
+
 // Main reducer function
 AppState reduce(const AppState* state, const Action* action) {
     // If powered off, only respond to buttons (wake up) or power toggle
@@ -435,9 +436,6 @@ AppState reduce(const AppState* state, const Action* action) {
         case ACTION_TICK_1S:
             return handle_tick_1s(state);
 
-        case ACTION_BOARD_ADDRESS_UPDATED:
-            return handle_board_address_updated(state, action);
-
         case ACTION_SD_CARD_MOUNTED:
             return handle_sd_mounted(state);
 
@@ -464,6 +462,9 @@ AppState reduce(const AppState* state, const Action* action) {
 
         case ACTION_FSEQ_LOOP_COMPLETE:
             return handle_fseq_loop_complete(state);
+
+        case ACTION_FSEQ_FPS_UPDATE:
+            return handle_fseq_fps_update(state, action);
 
         case ACTION_NONE:
         default:

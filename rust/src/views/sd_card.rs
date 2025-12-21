@@ -42,19 +42,27 @@ impl SdCardView {
         if !state.sd_card.mounted {
             display.text("Scanning...", 28, 30);
         } else if state.sd_card.is_playing {
-            let status = if state.sd_card.auto_loop {
-                "PLAYING [AUTO]"
+            // Show FPS in header
+            let mut header: String<24> = String::new();
+            if state.sd_card.fps > 0 {
+                write!(header, "PLAYING @ {}fps", state.sd_card.fps).ok();
             } else {
-                "PLAYING"
-            };
-            display.text(status, 24, 26);
+                write!(header, "PLAYING...").ok();
+            }
+            let x = if header.len() > 20 { 0 } else { (128 - header.len() * 6) / 2 };
+            display.text(&header, x as i32, 20);
+
+            // Show auto mode indicator
+            if state.sd_card.auto_loop {
+                display.text("[AUTO]", 44, 32);
+            }
 
             // Show playing filename
             let idx = state.sd_card.playing_index as usize;
             let name = get_filename(idx);
             // Center the filename (roughly)
             let x = if name.len() > 20 { 0 } else { (128 - name.len() * 6) / 2 };
-            display.text(&name, x as i32, 40);
+            display.text(&name, x as i32, 44);
             display.text("Press to stop", 22, 56);
         } else if state.sd_card.file_count == 0 {
             display.text("No .fseq files", 20, 30);

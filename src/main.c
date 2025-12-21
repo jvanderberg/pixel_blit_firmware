@@ -8,7 +8,6 @@
 #include "pico/multicore.h"
 #include "pico/flash.h"  // For flash_safe_execute_core_init
 #include "hardware/i2c.h"
-#include "hardware/adc.h"
 #include "hardware/gpio.h"
 #include "hardware/sync.h"  // For __dmb() memory barrier
 
@@ -50,10 +49,6 @@
 #define BTN_SELECT_PIN 43
 #define BTN_NEXT_PIN 45
 
-#define BOARD_ADDR_ADC_GPIO 40
-#define BOARD_ADDR_ADC_CH 0
-#define BOARD_ADDR_SAMPLES 100
-
 #define STRING_OUT_BASE_PIN 0
 
 // Timing
@@ -79,58 +74,6 @@ static volatile uint64_t select_last_press_us = 0;
 static volatile uint64_t next_last_press_us = 0;
 static volatile bool select_pressed = false;
 static volatile bool next_pressed = false;
-
-// Board address decoding
-// Theoretical ADC values for each code (sorted high→low by voltage)
-// Code order: 0,8,4,C,2,A,6,E,1,9,5,D,3,B,7,F
-static const uint16_t level_codes[16] = {
-    4095, 3723, 3374, 3117,  // 0, 8, 4, C
-    2786, 2608, 2432, 2296,  // 2, A, 6, E
-    2048, 1950, 1850, 1770,  // 1, 9, 5, D
-    1658, 1593, 1526, 1471   // 3, B, 7, F
-};
-
-static const uint8_t code_by_rank[16] = {
-    0x0, 0x8, 0x4, 0xC,
-    0x2, 0xA, 0x6, 0xE,
-    0x1, 0x9, 0x5, 0xD,
-    0x3, 0xB, 0x7, 0xF
-};
-
-static inline uint16_t absdiff_u16(uint16_t a, uint16_t b) {
-    return (a > b) ? (uint16_t)(a - b) : (uint16_t)(b - a);
-}
-
-static void decode_board_address(uint16_t sample, uint8_t* code, uint16_t* error, uint16_t* margin) {
-    uint16_t best_err = absdiff_u16(level_codes[0], sample);
-    uint16_t next_err = UINT16_MAX;
-    int best_rank = 0;
-
-    for (int i = 1; i < 16; i++) {
-        uint16_t err = absdiff_u16(level_codes[i], sample);
-        if (err < best_err) {
-            next_err = best_err;
-            best_err = err;
-            best_rank = i;
-        } else if (err < next_err) {
-            next_err = err;
-        }
-    }
-
-    *code = code_by_rank[best_rank];
-    *error = best_err;
-    *margin = (next_err == UINT16_MAX) ? 0 : (uint16_t)(next_err - best_err);
-}
-
-static uint16_t sample_board_address_adc(void) {
-    uint32_t acc = 0;
-    adc_select_input(BOARD_ADDR_ADC_CH);
-    for (int i = 0; i < BOARD_ADDR_SAMPLES; i++) {
-        acc += adc_read();
-        sleep_us(100);
-    }
-    return (uint16_t)(acc / BOARD_ADDR_SAMPLES);
-}
 
 // Combined GPIO ISR for buttons and IR
 // Placed in RAM to avoid flash XIP latency
@@ -196,24 +139,19 @@ int main() {
     gpio_set_dir(BTN_NEXT_PIN, GPIO_IN);
     gpio_pull_up(BTN_NEXT_PIN);
 
-    // Initialize ADC for board address
-    adc_init();
-    adc_gpio_init(BOARD_ADDR_ADC_GPIO);
-
-    // Read board ID and load configuration from SD card
-    // Delay for ADC settling after init
-    sleep_ms(100);
-    uint16_t adc_sample = sample_board_address_adc();
-    uint8_t board_id;
-    uint16_t adc_error, adc_margin;
-    decode_board_address(adc_sample, &board_id, &adc_error, &adc_margin);
-    printf("Board ID: %u (ADC: %u, err: %u, margin: %u)\n",
-           board_id, adc_sample, adc_error, adc_margin);
-
     // Configure SD card library to use DMA_IRQ_1 BEFORE first SD access
     // (IRQ_0 is used by pb_led_driver)
     set_spi_dma_irq_channel(true, true);  // useChannel1=true, shared=true
 
+    // Load board ID from flash settings (defaults to 0 if not set)
+    flash_settings_t boot_settings;
+    uint8_t board_id = 0;
+    if (flash_settings_load(&boot_settings)) {
+        board_id = boot_settings.board_id;
+    }
+    printf("Board ID: %u (from flash settings)\n", board_id);
+
+    // Load board configuration from SD card
     board_config_load_result_t config_result = board_config_load_from_sd(board_id);
     if (!config_result.success) {
         printf("Config: %s - using defaults\n", config_result.error_msg);
@@ -272,14 +210,14 @@ int main() {
     multicore_launch_core1(core1_main);
     printf("Core 1 launched\n");
 
-    // Load saved settings and initialize application state
-    flash_settings_t saved_settings;
-    if (flash_settings_load(&saved_settings)) {
+    // Initialize application state from boot_settings (already loaded earlier)
+    if (flash_settings_load(&boot_settings)) {
         current_state = app_state_init_with_settings(
-            saved_settings.brightness,
-            saved_settings.was_playing,
-            saved_settings.playing_index,
-            saved_settings.auto_loop);
+            boot_settings.brightness,
+            boot_settings.was_playing,
+            boot_settings.playing_index,
+            boot_settings.auto_loop,
+            boot_settings.board_id);
     } else {
         current_state = app_state_init();
     }
@@ -308,7 +246,6 @@ int main() {
     // Timing
     absolute_time_t last_tick_1s = get_absolute_time();
     absolute_time_t last_display_refresh = get_absolute_time();
-    absolute_time_t last_board_addr_sample = get_absolute_time();
 
     printf("Entering main loop\n");
 
@@ -378,18 +315,6 @@ int main() {
             dispatch(action_tick_1s(now_us));
         }
 
-        // Sample board address periodically (every 100ms)
-        if (absolute_time_diff_us(last_board_addr_sample, now) >= 100000) {
-            last_board_addr_sample = now;
-
-            uint16_t adc_value = sample_board_address_adc();
-            uint8_t code;
-            uint16_t error, margin;
-            decode_board_address(adc_value, &code, &error, &margin);
-
-            dispatch(action_board_address_updated(now_us, adc_value, code, error, margin));
-        }
-
         // Periodic FPS update for rainbow test display
         if (current_state.in_detail_view &&
             current_state.menu_selection == MENU_RAINBOW_TEST &&
@@ -398,6 +323,16 @@ int main() {
             uint16_t fps = rainbow_test_get_fps(hw_context.rainbow_test);
             if (fps != current_state.rainbow_test.fps) {
                 dispatch(action_rainbow_frame_complete(now_us, fps));
+            }
+        }
+
+        // Periodic FPS update for FSEQ playback display
+        if (current_state.sd_card.is_playing &&
+            absolute_time_diff_us(last_display_refresh, now) >= DISPLAY_REFRESH_US) {
+            last_display_refresh = now;
+            uint16_t fps = core1_get_fseq_fps();
+            if (fps != current_state.sd_card.fps) {
+                dispatch(action_fseq_fps_update(now_us, fps));
             }
         }
 

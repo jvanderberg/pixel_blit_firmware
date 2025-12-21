@@ -31,10 +31,16 @@ impl Default for BoardConfig {
     }
 }
 
+/// Short 8.3 filename for FAT operations (12 chars: 8 name + dot + 3 ext)
+pub const MAX_SHORT_NAME_LEN: usize = 13;
+
 /// List of .fseq filenames found on SD card
 #[derive(Clone, Debug)]
 pub struct FileList {
+    /// Long filenames for display
     pub names: [String<MAX_FILENAME_LEN>; MAX_FSEQ_FILES],
+    /// Short 8.3 names for file operations
+    pub short_names: [String<MAX_SHORT_NAME_LEN>; MAX_FSEQ_FILES],
     pub count: u8,
 }
 
@@ -42,6 +48,7 @@ impl Default for FileList {
     fn default() -> Self {
         Self {
             names: Default::default(),
+            short_names: [const { String::new() }; MAX_FSEQ_FILES],
             count: 0,
         }
     }
@@ -61,6 +68,7 @@ mod file_list_static {
     static FILE_LIST: Mutex<CriticalSectionRawMutex, RefCell<FileList>> =
         Mutex::new(RefCell::new(FileList {
             names: [const { String::new() }; MAX_FSEQ_FILES],
+            short_names: [const { String::new() }; MAX_FSEQ_FILES],
             count: 0
         }));
 
@@ -71,12 +79,24 @@ mod file_list_static {
         });
     }
 
-    /// Get a filename by index
+    /// Get a display filename by index (long filename)
     pub fn get_filename(index: usize) -> String<MAX_FILENAME_LEN> {
         FILE_LIST.lock(|list| {
             let list = list.borrow();
             if index < list.count as usize {
                 list.names[index].clone()
+            } else {
+                String::new()
+            }
+        })
+    }
+
+    /// Get a short 8.3 filename by index (for file operations)
+    pub fn get_short_filename(index: usize) -> String<MAX_SHORT_NAME_LEN> {
+        FILE_LIST.lock(|list| {
+            let list = list.borrow();
+            if index < list.count as usize {
+                list.short_names[index].clone()
             } else {
                 String::new()
             }
@@ -90,7 +110,7 @@ mod file_list_static {
 }
 
 #[cfg(feature = "firmware")]
-pub use file_list_static::{set_file_list, get_filename, get_file_count};
+pub use file_list_static::{set_file_list, get_filename, get_short_filename, get_file_count};
 
 /// SD card error types
 #[derive(Clone, Debug)]
@@ -256,7 +276,7 @@ pub mod hw {
     use core::convert::Infallible;
 
     /// Dummy time source (we don't need real timestamps)
-    struct DummyTimeSource;
+    pub struct DummyTimeSource;
 
     impl TimeSource for DummyTimeSource {
         fn get_timestamp(&self) -> Timestamp {
@@ -279,7 +299,8 @@ pub mod hw {
 
     /// SD card reader wrapping embedded-sdmmc
     pub struct SdReader<'a> {
-        vm: VolumeManager<SdCardType<'a>, DummyTimeSource>,
+        /// Volume manager - public for direct file access in streaming scenarios
+        pub vm: VolumeManager<SdCardType<'a>, DummyTimeSource>,
     }
 
     /// Convert ShortFileName to a heapless String
@@ -372,31 +393,118 @@ pub mod hw {
                     return;
                 }
 
-                // Prefer long filename if available, otherwise use 8.3 short name
-                let name_str = lfn.unwrap_or_else(|| {
-                    // Fallback: we'll handle this below
-                    ""
-                });
+                // Always get short name for file operations
+                let short_name = short_name_to_string(&entry.name);
 
-                // Build the filename string
-                let mut name: String<MAX_FILENAME_LEN> = String::new();
-                if !name_str.is_empty() {
-                    // Use the long filename
-                    for c in name_str.chars().take(MAX_FILENAME_LEN) {
-                        name.push(c).ok();
+                // Prefer long filename for display if available
+                let mut display_name: String<MAX_FILENAME_LEN> = String::new();
+                if let Some(lfn_str) = lfn {
+                    for c in lfn_str.chars().take(MAX_FILENAME_LEN) {
+                        display_name.push(c).ok();
                     }
                 } else {
-                    // Use the short 8.3 name
-                    name = short_name_to_string(&entry.name);
+                    // Use short name for display too
+                    for c in short_name.chars().take(MAX_FILENAME_LEN) {
+                        display_name.push(c).ok();
+                    }
                 }
 
-                if is_fseq_file(&name) {
-                    files.names[files.count as usize] = name;
+                if is_fseq_file(&display_name) {
+                    let idx = files.count as usize;
+                    files.names[idx] = display_name;
+                    // Convert short_name to correct size
+                    let mut short: String<MAX_SHORT_NAME_LEN> = String::new();
+                    for c in short_name.chars().take(MAX_SHORT_NAME_LEN) {
+                        short.push(c).ok();
+                    }
+                    files.short_names[idx] = short;
                     files.count += 1;
                 }
             }).map_err(|_| SdError::ReadError)?;
 
             Ok(files)
+        }
+
+        /// Read a chunk from an FSEQ file at the specified offset.
+        /// Returns (bytes_read, is_eof).
+        /// NOTE: This opens/closes the file each call - use with_fseq_file for streaming.
+        pub fn read_fseq_chunk(
+            &mut self,
+            filename: &str,
+            offset: u32,
+            buffer: &mut [u8],
+        ) -> Result<(usize, bool), SdError> {
+            let volume = self.vm.open_volume(VolumeIdx(0)).map_err(|_| SdError::MountFailed)?;
+            let root_dir = volume.open_root_dir().map_err(|_| SdError::MountFailed)?;
+
+            let file = root_dir.open_file_in_dir(filename, embedded_sdmmc::Mode::ReadOnly)
+                .map_err(|_| SdError::FileNotFound)?;
+
+            file.seek_from_start(offset).map_err(|_| SdError::ReadError)?;
+            let bytes_read = file.read(buffer).map_err(|_| SdError::ReadError)?;
+            let is_eof = file.is_eof();
+
+            Ok((bytes_read, is_eof))
+        }
+
+        /// Read an entire frame from an FSEQ file.
+        /// Opens file, seeks, reads all frame data, closes. More efficient than per-chunk reads.
+        /// Returns bytes read.
+        pub fn read_fseq_frame(
+            &mut self,
+            filename: &str,
+            offset: u32,
+            buffer: &mut [u8],
+        ) -> Result<usize, SdError> {
+            let volume = self.vm.open_volume(VolumeIdx(0)).map_err(|_| SdError::MountFailed)?;
+            let root_dir = volume.open_root_dir().map_err(|_| SdError::MountFailed)?;
+            let file = root_dir.open_file_in_dir(filename, embedded_sdmmc::Mode::ReadOnly)
+                .map_err(|_| SdError::FileNotFound)?;
+
+            file.seek_from_start(offset).map_err(|_| SdError::ReadError)?;
+
+            // Read as much as the buffer can hold
+            let bytes_read = file.read(buffer).map_err(|_| SdError::ReadError)?;
+            Ok(bytes_read)
+        }
+
+        /// Stream an FSEQ file, calling the provided function for each frame's worth of data.
+        /// File stays open for the entire duration - no repeated open/close.
+        pub fn stream_fseq<F>(
+            &mut self,
+            filename: &str,
+            start_offset: u32,
+            frame_size: usize,
+            buffer: &mut [u8],
+            mut on_frame: F,
+        ) -> Result<(), SdError>
+        where
+            F: FnMut(&[u8]) -> bool, // Returns false to stop
+        {
+            let volume = self.vm.open_volume(VolumeIdx(0)).map_err(|_| SdError::MountFailed)?;
+            let root_dir = volume.open_root_dir().map_err(|_| SdError::MountFailed)?;
+            let file = root_dir.open_file_in_dir(filename, embedded_sdmmc::Mode::ReadOnly)
+                .map_err(|_| SdError::FileNotFound)?;
+
+            file.seek_from_start(start_offset).map_err(|_| SdError::ReadError)?;
+
+            loop {
+                // Read one frame
+                let bytes_read = file.read(&mut buffer[..frame_size]).map_err(|_| SdError::ReadError)?;
+
+                if bytes_read == 0 {
+                    // EOF - restart from beginning
+                    file.seek_from_start(start_offset).map_err(|_| SdError::ReadError)?;
+                    continue;
+                }
+
+                // Call handler - if it returns false, stop
+                if !on_frame(&buffer[..bytes_read]) {
+                    break;
+                }
+            }
+
+            Ok(())
         }
     }
 }

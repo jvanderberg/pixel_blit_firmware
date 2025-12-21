@@ -153,6 +153,8 @@ pub struct SdCardState {
     pub playing_index: u8,
     pub auto_loop: bool,
     pub error_message: Option<&'static str>,
+    /// Measured FPS during FSEQ playback
+    pub fps: u16,
 }
 
 /// Rainbow test state

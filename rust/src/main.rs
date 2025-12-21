@@ -3,15 +3,13 @@
 
 mod generators;
 mod tasks;
-mod usb;
 
-use defmt::info;
+use defmt::{info, debug};
 use embassy_executor::Spawner;
 use embassy_rp::gpio::{Input, Pull};
 use embassy_rp::i2c::{self, Config as I2cConfig, I2c};
-use embassy_rp::peripherals::{I2C1, PIO1, USB};
+use embassy_rp::peripherals::{I2C1, PIO1};
 use embassy_rp::pio::InterruptHandler as PioInterruptHandler;
-use embassy_rp::usb::InterruptHandler as UsbInterruptHandler;
 use embassy_time::Timer;
 use reducto::App;
 use sh1106::Builder;
@@ -27,11 +25,10 @@ use pixel_blit::storage::persist::Settings;
 use pixel_blit::views::RootView;
 
 use generators::{RAINBOW, STRING_LENGTH};
-use tasks::{ACTION_CHANNEL, SD_RESCAN_CHANNEL};
+use tasks::{ACTION_CHANNEL, SD_RESCAN_CHANNEL, FSEQ_COMMAND_CHANNEL, FseqCommand};
 
 embassy_rp::bind_interrupts!(pub struct Irqs {
     I2C1_IRQ => i2c::InterruptHandler<I2C1>;
-    USBCTRL_IRQ => UsbInterruptHandler<USB>;
     PIO1_IRQ_0 => PioInterruptHandler<PIO1>;
 });
 
@@ -39,16 +36,14 @@ embassy_rp::bind_interrupts!(pub struct Irqs {
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    // USB CDC first
-    usb::init(&spawner, p.USB);
-    Timer::after_millis(2000).await;
+    // Brief delay for probe to connect
+    Timer::after_millis(100).await;
 
     info!("Pixel Blit Firmware starting...");
-    usb_println!("Pixel Blit Firmware starting...");
 
     // Load settings from flash
     let (mut settings, state) = Settings::init(p.FLASH, p.DMA_CH3, &spawner);
-    usb_println!("Settings loaded: brightness={}", state.brightness_level);
+    info!("Settings: brightness={}, board={}", state.brightness_level, state.board_id);
 
     // Spawn button tasks
     let btn_next = Input::new(p.PIN_45, Pull::Up);
@@ -91,7 +86,7 @@ async fn main(spawner: Spawner) {
     let mut app: App<AppState, Action, AppReducer, _> = App::new(view, state);
     app.dispatch(Action::Boot);
 
-    usb_println!("Entering main loop");
+    info!("Entering main loop");
 
     // Main loop
     loop {
@@ -104,7 +99,7 @@ async fn main(spawner: Spawner) {
             AppEffect::Save => {
                 let state = app.state();
                 if settings.save_state(state) {
-                    usb_println!("Saving: brightness={}, board={}",
+                    debug!("Saving: brightness={}, board={}",
                         state.brightness_level, state.board_id);
                 }
             }
@@ -146,6 +141,18 @@ async fn main(spawner: Spawner) {
 
             AppEffect::SdRescan => {
                 SD_RESCAN_CHANNEL.try_send(app.state().board_id).ok();
+            }
+
+            AppEffect::FseqStart => {
+                let state = app.state();
+                FSEQ_COMMAND_CHANNEL.try_send(FseqCommand::Play {
+                    file_index: state.sd_card.playing_index,
+                    string_configs: state.strings,
+                }).ok();
+            }
+
+            AppEffect::FseqStop => {
+                FSEQ_COMMAND_CHANNEL.try_send(FseqCommand::Stop).ok();
             }
         }
     }

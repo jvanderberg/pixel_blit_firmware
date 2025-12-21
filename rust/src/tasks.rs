@@ -1,6 +1,6 @@
 //! Async tasks for the firmware.
 
-use defmt::info;
+use defmt::{info, warn, error, debug};
 use embassy_rp::gpio::{Input, Level, Output};
 use embassy_rp::peripherals::{PIO1, SPI0};
 use embassy_rp::pio::Pio;
@@ -8,20 +8,39 @@ use embassy_rp::spi::{Config as SpiConfig, Spi};
 use embassy_rp::Peri;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::Timer;
+use embassy_time::{Duration, Instant, Timer};
+use heapless::String;
 
 use pixel_blit::action::Action;
-use pixel_blit::led_driver::{self, WriteToken};
+use pixel_blit::fseq_parser::{FseqLayout, FseqParser};
+use pixel_blit::led_driver::{self, FrameStringConfig, WriteToken};
+use pixel_blit::led_driver::buffer::{FRAME_CHANNEL, FREE_CHANNEL, FSEQ_REQUEST_CHANNEL, FSEQ_TOKEN_CHANNEL, FSEQ_RETURN_CHANNEL};
 use pixel_blit::sdcard::hw::SdReader;
-use pixel_blit::sdcard::set_file_list;
+use pixel_blit::sdcard::{set_file_list, get_filename, get_short_filename, MAX_FILENAME_LEN, MAX_SHORT_NAME_LEN};
+use embedded_sdmmc::{Mode, VolumeIdx};
 
-use crate::{usb_println, Irqs};
+use crate::Irqs;
 
 /// Channel for dispatching actions to the main loop.
 pub static ACTION_CHANNEL: Channel<CriticalSectionRawMutex, Action, 4> = Channel::new();
 
 /// Channel to trigger SD card rescan.
 pub static SD_RESCAN_CHANNEL: Channel<CriticalSectionRawMutex, u8, 1> = Channel::new();
+
+/// Command for FSEQ playback
+#[derive(Clone)]
+pub enum FseqCommand {
+    /// Start playing a file by index
+    Play {
+        file_index: u8,
+        string_configs: [pixel_blit::state::StringConfig; 32],
+    },
+    /// Stop playback
+    Stop,
+}
+
+/// Channel for FSEQ playback commands
+pub static FSEQ_COMMAND_CHANNEL: Channel<CriticalSectionRawMutex, FseqCommand, 2> = Channel::new();
 
 // ============================================================================
 // Button Tasks
@@ -65,6 +84,9 @@ pub async fn tick_task() {
 // SD Card Task
 // ============================================================================
 
+/// SPI frequency for SD card (25 MHz)
+const SD_SPI_SPEED_HZ: u32 = 25_000_000;
+
 #[embassy_executor::task]
 pub async fn sd_card_task(
     mut spi0: Peri<'static, SPI0>,
@@ -76,17 +98,17 @@ pub async fn sd_card_task(
     mut dma1: Peri<'static, embassy_rp::peripherals::DMA_CH1>,
     initial_board_id: u8,
 ) {
-    usb_println!("SD: waiting 1s before init...");
+    info!("SD: waiting 1s before init...");
     Timer::after_millis(1000).await;
 
     let mut board_id = initial_board_id;
     let mut config_loaded = false;
 
     loop {
-        usb_println!("SD: creating SdReader...");
+        debug!("SD: init at 25MHz...");
 
         let mut spi_config = SpiConfig::default();
-        spi_config.frequency = 400_000;
+        spi_config.frequency = SD_SPI_SPEED_HZ;
         let spi = Spi::new(
             spi0.reborrow(),
             clk.reborrow(),
@@ -100,13 +122,13 @@ pub async fn sd_card_task(
 
         match SdReader::new(spi, cs) {
             Ok(mut reader) => {
-                usb_println!("SD: card detected");
+                info!("SD: card detected at 25MHz");
 
                 if !config_loaded {
-                    usb_println!("SD: loading config.csv for board {}...", board_id);
+                    info!("SD: loading config.csv for board {}", board_id);
                     match reader.load_config(board_id) {
                         Ok(config) => {
-                            usb_println!("SD: config loaded - {} strings, max {} px",
+                            info!("SD: config loaded - {} strings, max {} px",
                                 config.string_count, config.max_pixel_count);
                             ACTION_CHANNEL.send(Action::SdConfigLoaded {
                                 strings: config.strings,
@@ -116,7 +138,7 @@ pub async fn sd_card_task(
                             config_loaded = true;
                         }
                         Err(e) => {
-                            usb_println!("SD: config error: {}", e.message());
+                            warn!("SD: config error: {}", e.message());
                             ACTION_CHANNEL.send(Action::SdConfigError {
                                 message: "No config.csv - defaults",
                             }).await;
@@ -125,35 +147,313 @@ pub async fn sd_card_task(
                     }
                 }
 
-                usb_println!("SD: scanning for .fseq files...");
+                info!("SD: scanning for .fseq files...");
                 match reader.scan_fseq_files() {
                     Ok(files) => {
                         let count = files.count;
-                        usb_println!("SD: found {} files", count);
+                        info!("SD: found {} files", count);
                         set_file_list(files);
                         ACTION_CHANNEL.send(Action::SdFilesScanned { count }).await;
                     }
                     Err(e) => {
-                        usb_println!("SD: scan error: {}", e.message());
+                        error!("SD: scan error: {}", e.message());
                         ACTION_CHANNEL.send(Action::SdCardError {
                             message: e.message(),
                         }).await;
                     }
                 }
-                usb_println!("SD: scan complete");
+                debug!("SD: scan complete");
+
+                // Now wait for commands (rescan or FSEQ playback)
+                loop {
+                    use embassy_futures::select::{select, Either};
+
+                    match select(
+                        SD_RESCAN_CHANNEL.receive(),
+                        FSEQ_COMMAND_CHANNEL.receive(),
+                    ).await {
+                        Either::First(new_board_id) => {
+                            info!("SD: rescan requested for board {}", new_board_id);
+                            board_id = new_board_id;
+                            break; // Exit inner loop to rescan
+                        }
+                        Either::Second(cmd) => {
+                            match cmd {
+                                FseqCommand::Play { file_index, string_configs } => {
+                                    info!("SD: FSEQ play for index {}", file_index);
+                                    play_fseq(&mut reader, file_index, &string_configs).await;
+                                }
+                                FseqCommand::Stop => {
+                                    debug!("SD: FSEQ stop (not playing)");
+                                }
+                            }
+                        }
+                    }
+                }
             }
             Err(e) => {
-                usb_println!("SD: init FAILED: {}", e.message());
+                error!("SD: init FAILED: {}", e.message());
                 ACTION_CHANNEL.send(Action::SdCardError {
                     message: e.message(),
                 }).await;
                 Timer::after_millis(500).await;
+
+                // Wait for rescan request
+                board_id = SD_RESCAN_CHANNEL.receive().await;
+                info!("SD: rescan requested for board {}", board_id);
+            }
+        }
+    }
+}
+
+/// Play an FSEQ file from the SD card.
+/// Takes over buffer control from the runner, writes pixels directly.
+///
+/// IMPORTANT: This function keeps the file open for the entire playback session.
+/// No open/close per frame - just sequential reads from the same file handle.
+async fn play_fseq(
+    reader: &mut SdReader<'_>,
+    file_index: u8,
+    string_configs: &[pixel_blit::state::StringConfig; 32],
+) {
+    // Get filenames - display name for logging, short name for FAT operations
+    let display_name: String<MAX_FILENAME_LEN> = get_filename(file_index as usize);
+    let short_name: String<MAX_SHORT_NAME_LEN> = get_short_filename(file_index as usize);
+    if short_name.is_empty() {
+        error!("FSEQ: invalid file index {}", file_index);
+        return;
+    }
+
+    info!("FSEQ: opening {} ({})", display_name.as_str(), short_name.as_str());
+
+    // Open volume, directory, and file - these stay open for entire playback!
+    let volume = match reader.vm.open_volume(VolumeIdx(0)) {
+        Ok(v) => v,
+        Err(_) => {
+            error!("FSEQ: failed to mount volume");
+            return;
+        }
+    };
+    let root_dir = match volume.open_root_dir() {
+        Ok(d) => d,
+        Err(_) => {
+            error!("FSEQ: failed to open root dir");
+            return;
+        }
+    };
+    let file = match root_dir.open_file_in_dir(short_name.as_str(), Mode::ReadOnly) {
+        Ok(f) => f,
+        Err(_) => {
+            error!("FSEQ: file not found: {}", short_name.as_str());
+            return;
+        }
+    };
+
+    // Read header (file is already at position 0)
+    let mut header_buf = [0u8; 32];
+    match file.read(&mut header_buf) {
+        Ok(32) => {}
+        Ok(n) => {
+            error!("FSEQ: short header read: {} bytes", n);
+            return;
+        }
+        Err(_) => {
+            error!("FSEQ: failed to read header");
+            return;
+        }
+    }
+
+    // Build layout from string configs - must match xLights model order
+    let mut layout = FseqLayout::default();
+    let mut total_channels: u32 = 0;
+    for (i, cfg) in string_configs.iter().enumerate() {
+        layout.string_lengths[i] = cfg.pixel_count;
+        total_channels += cfg.pixel_count as u32 * 3;
+        if cfg.pixel_count > 0 {
+            layout.num_strings = (i + 1) as u8;
+        }
+    }
+
+    // Initialize parser
+    let mut parser = FseqParser::new(layout);
+    let header = match parser.parse_header(&header_buf) {
+        Some(h) => h,
+        None => {
+            error!("FSEQ: invalid header (not FSEQ v2)");
+            return;
+        }
+    };
+
+    let fps = header.fps();
+    let frame_count = header.frame_count;
+    let channel_data_offset = header.channel_data_offset as u32;
+    let file_channels = header.channel_count;
+
+    info!("FSEQ: {} frames @ {} fps", frame_count, fps);
+    info!("FSEQ: file has {} ch, layout expects {} ch", file_channels, total_channels);
+
+    if file_channels != total_channels {
+        warn!("FSEQ: channel count mismatch! Check config.csv");
+    }
+
+    // Build frame string configs
+    let mut frame_configs = [FrameStringConfig::default(); 32];
+    for (i, cfg) in string_configs.iter().enumerate() {
+        frame_configs[i] = FrameStringConfig {
+            length: cfg.pixel_count,
+            color_order: cfg.color_order,
+        };
+    }
+
+    // Seek to channel data start
+    if file.seek_from_start(channel_data_offset).is_err() {
+        error!("FSEQ: failed to seek to data offset");
+        return;
+    }
+
+    // Request token takeover from runner
+    info!("FSEQ: requesting buffer control");
+    FSEQ_REQUEST_CHANNEL.send(()).await;
+    let mut token = FSEQ_TOKEN_CHANNEL.receive().await;
+    info!("FSEQ: got buffer, starting playback @ {} fps", fps);
+
+    // Timing
+    let frame_interval = Duration::from_micros(1_000_000 / fps as u64);
+    let mut last_frame_time = Instant::now();
+
+    // FPS measurement
+    let mut fps_frame_count: u32 = 0;
+    let mut fps_last_time = Instant::now();
+
+    // Playback state
+    let mut frames_played: u32 = 0;
+    let frame_size = file_channels as usize; // Bytes per frame = channel count
+    // Buffer for one frame (max ~10KB for 32 strings * ~100 pixels * 3 channels)
+    let mut frame_buffer = [0u8; 12000];
+
+    // Configure buffer once (doesn't change per frame)
+    {
+        let buffer = token.get_mut();
+        for (i, cfg) in frame_configs.iter().enumerate() {
+            buffer.set_string_config(i as u8, *cfg);
+        }
+    }
+
+    'playback: loop {
+        // Check for stop command
+        if let Ok(cmd) = FSEQ_COMMAND_CHANNEL.try_receive() {
+            match cmd {
+                FseqCommand::Stop => {
+                    info!("FSEQ: stop command");
+                    break 'playback;
+                }
+                FseqCommand::Play { file_index: new_index, .. } => {
+                    info!("FSEQ: switching to file {}", new_index);
+                    break 'playback;
+                }
             }
         }
 
-        board_id = SD_RESCAN_CHANNEL.receive().await;
-        usb_println!("SD: rescan requested for board {}", board_id);
+        // Check for loop completion
+        if frames_played >= frame_count {
+            info!("FSEQ: loop complete ({} frames)", frames_played);
+            ACTION_CHANNEL.send(Action::FseqLoopComplete).await;
+
+            // Reset for next loop - seek back to data start
+            parser.reset();
+            if file.seek_from_start(channel_data_offset).is_err() {
+                error!("FSEQ: failed to seek for loop");
+                break 'playback;
+            }
+            frames_played = 0;
+        }
+
+        // Clear LED buffer for new frame
+        token.get_mut().clear();
+
+        // Read one frame from file - with timing
+        let read_start = Instant::now();
+        let bytes_read = match file.read(&mut frame_buffer[..frame_size]) {
+            Ok(n) => n,
+            Err(_) => {
+                error!("FSEQ: read error");
+                break 'playback;
+            }
+        };
+        let read_time = Instant::now().duration_since(read_start);
+
+        if bytes_read == 0 {
+            warn!("FSEQ: unexpected EOF, looping");
+            parser.reset();
+            if file.seek_from_start(channel_data_offset).is_err() {
+                break 'playback;
+            }
+            frames_played = 0;
+            continue;
+        }
+
+        // Parse frame and write pixels to buffer - with timing
+        let parse_start = Instant::now();
+        parser.push(&frame_buffer[..bytes_read]);
+        {
+            let buffer = token.get_mut();
+            for px in parser.pixels() {
+                buffer.set_pixel(px.string, px.pixel, px.color);
+            }
+        }
+        parser.clear_pixels();
+        let parse_time = Instant::now().duration_since(parse_start);
+
+        // Log timing every 100 frames
+        if frames_played % 100 == 0 {
+            info!("FSEQ: read={}us parse={}us", read_time.as_micros(), parse_time.as_micros());
+        }
+
+        frames_played += 1;
+        fps_frame_count += 1;
+
+        // Update FPS measurement every second
+        let elapsed = Instant::now().duration_since(fps_last_time);
+        if elapsed.as_millis() >= 1000 {
+            let measured_fps = (fps_frame_count as u64 * 1000) / elapsed.as_millis();
+            ACTION_CHANNEL.send(Action::FseqFpsUpdate { fps: measured_fps as u16 }).await;
+            fps_frame_count = 0;
+            fps_last_time = Instant::now();
+        }
+
+        // Log progress sparingly
+        if frames_played <= 3 || frames_played % 500 == 0 {
+            info!("FSEQ: frame {}", frames_played);
+        }
+
+        // FPS limiting - wait until frame time
+        let target_time = last_frame_time + frame_interval;
+        let now = Instant::now();
+        if now < target_time {
+            Timer::after(target_time - now).await;
+        }
+        last_frame_time = target_time; // Drift correction
+
+        // Send frame to output, get next buffer
+        let read_token = token.into_read_token();
+        FRAME_CHANNEL.send(read_token).await;
+        token = FREE_CHANNEL.receive().await;
     }
+
+    // File closes automatically when dropped here
+
+    // Clear final frame before returning control
+    token.get_mut().clear();
+    let read_token = token.into_read_token();
+    FRAME_CHANNEL.send(read_token).await;
+    let token = FREE_CHANNEL.receive().await;
+
+    // Reset FPS display
+    ACTION_CHANNEL.send(Action::FseqFpsUpdate { fps: 0 }).await;
+
+    // Return token to runner
+    info!("FSEQ: returning buffer control");
+    FSEQ_RETURN_CHANNEL.send(token).await;
 }
 
 // ============================================================================
@@ -166,21 +466,20 @@ pub async fn led_output_task(
     dma: Peri<'static, embassy_rp::peripherals::DMA_CH2>,
 ) {
     Timer::after_millis(100).await;
-    usb_println!("LED Output: initializing PIO1...");
+    info!("LED Output: initializing PIO1");
 
     let Pio { mut common, sm0, .. } = Pio::new(pio1, Irqs);
 
-    usb_println!("LED Output: configuring 32 parallel outputs...");
+    debug!("LED Output: configuring 32 parallel outputs");
     let output = led_driver::LedOutput::new_parallel_32(&mut common, sm0);
-    usb_println!("LED Output: running output loop");
+    info!("LED Output: running");
 
     led_driver::run_output_loop(output, dma).await
 }
 
 #[embassy_executor::task]
 pub async fn led_runner_task(token: WriteToken) {
-    usb_println!("LED Runner: starting");
+    info!("LED Runner: starting");
     Timer::after_millis(100).await;
-    usb_println!("LED Runner: entering run loop");
     led_driver::run(token).await
 }

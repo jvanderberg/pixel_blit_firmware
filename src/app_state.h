@@ -40,18 +40,14 @@ typedef struct {
     uint8_t playing_index;         // Index into sd_file_list (reducer stays pure)
     bool auto_play_pending;        // Start playback after SD scan completes
     bool auto_loop;                // When true, auto-advance to next file on completion
+    uint16_t fps;                  // Measured FPS during playback
 } SdCardState;
 
 // External static file list (defined in main.c)
 extern char sd_file_list[SD_MAX_FILES][SD_FILENAME_LEN];
 
-// Board address decode result
-typedef struct {
-    uint16_t adc_value;
-    uint8_t code;
-    uint16_t error;
-    uint16_t margin;
-} BoardAddressInfo;
+// Board ID (0-15, user-configurable, persisted to flash)
+#define BOARD_ID_MAX 15
 
 // Info view state
 typedef struct {
@@ -105,8 +101,8 @@ typedef struct {
     MenuEntry menu_selection;
     bool in_detail_view;
 
-    // Board info
-    BoardAddressInfo board_address;
+    // Board ID (0-15, persisted to flash)
+    uint8_t board_id;
 
     // Info view
     InfoViewState info_view;
@@ -132,7 +128,7 @@ static inline AppState app_state_init(void) {
         .brightness_level = BRIGHTNESS_DEFAULT,
         .menu_selection = MENU_INFO,
         .in_detail_view = false,
-        .board_address = {0},
+        .board_id = 0,
         .info_view = {.scroll_index = 0},
         .sd_card = {
             .mounted = false,
@@ -163,9 +159,10 @@ static inline AppState app_state_init(void) {
 }
 
 // Initialize state with saved settings (for persistence restore)
-static inline AppState app_state_init_with_settings(uint8_t brightness, bool was_playing, uint8_t playing_index, bool auto_loop) {
+static inline AppState app_state_init_with_settings(uint8_t brightness, bool was_playing, uint8_t playing_index, bool auto_loop, uint8_t board_id) {
     AppState state = app_state_init();
     state.brightness_level = brightness;
+    state.board_id = board_id;
     state.sd_card.auto_loop = auto_loop;
     if (was_playing) {
         // Just set intent - main loop will trigger scan, reducer will navigate on completion

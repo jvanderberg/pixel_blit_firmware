@@ -94,14 +94,17 @@ static void render_info_detail(sh1106_t* display, const AppState* state) {
 static void render_board_address_detail(sh1106_t* display, const AppState* state) {
     char line[24];
     sh1106_clear(display);
-    sh1106_draw_string(display, 0, 0, "Board Address", false);
-    snprintf(line, sizeof(line), "ADC: %u", state->board_address.adc_value);
-    sh1106_draw_string(display, 0, 16, line, false);
-    snprintf(line, sizeof(line), "Code: 0x%X", state->board_address.code);
-    sh1106_draw_string(display, 0, 24, line, false);
-    snprintf(line, sizeof(line), "Err:%u M:%u", state->board_address.error, state->board_address.margin);
-    sh1106_draw_string(display, 0, 32, line, false);
-    sh1106_draw_string(display, 0, 48, "Next exits", false);
+    sh1106_draw_string(display, 0, 0, "Board ID", false);
+
+    // Show current board ID prominently
+    snprintf(line, sizeof(line), "ID: %u", state->board_id);
+    sh1106_draw_string(display, 0, 20, line, true);  // Highlighted
+
+    // Show valid range
+    sh1106_draw_string(display, 0, 36, "(Range: 0-15)", false);
+
+    sh1106_draw_string(display, 0, 48, "Sel: change", false);
+    sh1106_draw_string(display, 0, 56, "Next: exit & save", false);
     sh1106_render(display);
 }
 
@@ -111,12 +114,21 @@ static void render_sd_card_detail(sh1106_t* display, const AppState* state) {
 
     // Show playback state
     if (state->sd_card.is_playing) {
-        // Show PLAYING with AUTO indicator if enabled
-        if (state->sd_card.auto_loop) {
-            sh1106_draw_string(display, 0, 0, "PLAYING [AUTO]", true);
+        // Show PLAYING with FPS and AUTO indicator
+        if (state->sd_card.fps > 0) {
+            if (state->sd_card.auto_loop) {
+                snprintf(line, sizeof(line), "PLAYING %dfps [A]", state->sd_card.fps);
+            } else {
+                snprintf(line, sizeof(line), "PLAYING @ %dfps", state->sd_card.fps);
+            }
         } else {
-            sh1106_draw_string(display, 0, 0, "PLAYING", true);
+            if (state->sd_card.auto_loop) {
+                snprintf(line, sizeof(line), "PLAYING [AUTO]");
+            } else {
+                snprintf(line, sizeof(line), "PLAYING...");
+            }
         }
+        sh1106_draw_string(display, 0, 0, line, true);
         // Look up filename from static buffer using playing_index
         sh1106_draw_string(display, 0, 16, sd_file_list[state->sd_card.playing_index], false);
         // Show file position in playlist

@@ -117,9 +117,44 @@ reducto::reducer! {
             state.sd_card.auto_loop = !state.sd_card.auto_loop
         },
 
-        Action::FseqNext | Action::FseqLoopComplete => |_state| {
-            // TODO: implement file skip
-            AppEffect::Unchanged
+        Action::FseqNext => |state| {
+            if !state.is_powered_on { return AppEffect::Unchanged; }
+            if !state.sd_card.is_playing { return AppEffect::Unchanged; }
+
+            // Advance to next file (wrap around)
+            let next_index = if state.sd_card.playing_index + 1 >= state.sd_card.file_count {
+                0
+            } else {
+                state.sd_card.playing_index + 1
+            };
+            state.sd_card.playing_index = next_index;
+            state.sd_card.scroll_index = next_index;
+            AppEffect::FseqStart
+        },
+
+        Action::FseqLoopComplete => |state| {
+            if !state.is_powered_on { return AppEffect::Unchanged; }
+            if !state.sd_card.is_playing { return AppEffect::Unchanged; }
+
+            if state.sd_card.auto_loop {
+                // Auto-advance to next file
+                let next_index = if state.sd_card.playing_index + 1 >= state.sd_card.file_count {
+                    0
+                } else {
+                    state.sd_card.playing_index + 1
+                };
+                state.sd_card.playing_index = next_index;
+                state.sd_card.scroll_index = next_index;
+                AppEffect::FseqStart
+            } else {
+                // Just loop current file (no state change, but re-trigger)
+                AppEffect::Unchanged
+            }
+        },
+
+        Action::FseqFpsUpdate { fps } => |state| {
+            if !state.is_powered_on { return AppEffect::Unchanged; }
+            state.sd_card.fps = fps
         },
     }
 }
@@ -154,6 +189,7 @@ fn reduce_button_next(state: &mut AppState) -> AppEffect {
         MenuEntry::SdCard => {
             if state.sd_card.is_playing {
                 state.sd_card.is_playing = false;
+                AppEffect::FseqStop
             } else {
                 let max_scroll = state.sd_card.file_count;
                 state.sd_card.scroll_index = if state.sd_card.scroll_index >= max_scroll {
@@ -161,8 +197,8 @@ fn reduce_button_next(state: &mut AppState) -> AppEffect {
                 } else {
                     state.sd_card.scroll_index + 1
                 };
+                AppEffect::changed()
             }
-            AppEffect::changed()
         }
 
         MenuEntry::RainbowTest => {
@@ -228,14 +264,19 @@ fn reduce_button_select(state: &mut AppState) -> AppEffect {
 
         MenuEntry::SdCard => {
             if state.sd_card.is_playing {
+                // Stop playback
                 state.sd_card.is_playing = false;
+                AppEffect::FseqStop
             } else if state.sd_card.scroll_index >= state.sd_card.file_count {
+                // Exit option selected
                 state.in_detail_view = false;
+                AppEffect::changed()
             } else {
+                // Start playback of selected file
                 state.sd_card.is_playing = true;
                 state.sd_card.playing_index = state.sd_card.scroll_index;
+                AppEffect::FseqStart
             }
-            AppEffect::changed()
         }
 
         MenuEntry::RainbowTest => {

@@ -49,3 +49,6 @@ bool core1_is_idle(void);
 
 // Get FSEQ loop count (for auto-advance detection)
 uint32_t core1_get_fseq_loop_count(void);
+
+// Get current FSEQ playback FPS
+uint16_t core1_get_fseq_fps(void);

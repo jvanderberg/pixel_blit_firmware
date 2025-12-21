@@ -47,6 +47,8 @@ pub enum Action {
     AutoToggle,
     /// Current file finished looping
     FseqLoopComplete,
+    /// FSEQ playback FPS update
+    FseqFpsUpdate { fps: u16 },
 
     // Brightness events (IR remote)
     /// Increase brightness

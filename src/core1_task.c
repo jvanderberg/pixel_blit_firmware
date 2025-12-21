@@ -4,6 +4,7 @@
 #include "pico/flash.h"
 #include "hardware/sync.h"
 #include "fseq_player.h"
+#include "fseq_parser.h"
 #include "rainbow_test.h"
 #include <string.h>
 #include <stdio.h>
@@ -90,6 +91,10 @@ static bool run_rainbow_task(void) {
 void core1_main(void) {
     // Allow Core 0 to pause us for flash operations
     flash_safe_execute_core_init();
+
+    // Clean up any stale parser state from previous crash/reset
+    // This ensures the singleton flag is cleared if Core 1 was reset mid-playback
+    fseq_parser_force_cleanup();
 
     // Ensure clean state before processing commands
     // (static initializers may not be visible to Core 1 immediately)
@@ -228,4 +233,12 @@ uint32_t core1_get_fseq_loop_count(void) {
 void core1_notify_fseq_loop(void) {
     fseq_loop_count++;
     __dmb();
+}
+
+uint16_t core1_get_fseq_fps(void) {
+    if (g_fseq_ctx) {
+        __dmb();
+        return fseq_player_get_fps(g_fseq_ctx);
+    }
+    return 0;
 }

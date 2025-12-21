@@ -21,6 +21,7 @@ firmware = [
     "dep:embassy-time",
     "dep:embassy-rp",
     "dep:embassy-sync",
+    "dep:embassy-futures",
     "dep:embassy-usb",
     "dep:cortex-m",
     "dep:cortex-m-rt",
@@ -55,6 +56,7 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = [
 embassy-time = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"], optional = true }
 embassy-rp = { git = "https://github.com/embassy-rs/embassy", features = ["rp235xb", "critical-section-impl", "time-driver", "defmt", "unstable-pac"], optional = true }
 embassy-sync = { git = "https://github.com/embassy-rs/embassy", optional = true }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy", optional = true }
 
 # Cortex-M support
 cortex-m = { version = "0.7", optional = true }

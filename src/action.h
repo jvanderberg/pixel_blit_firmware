@@ -13,8 +13,7 @@ typedef enum {
     // Timer events
     ACTION_TICK_1S,          // 1 second tick for uptime, logging
 
-    // Sensor events
-    ACTION_BOARD_ADDRESS_UPDATED,
+    // SD card events
     ACTION_SD_CARD_MOUNTED,
     ACTION_SD_CARD_ERROR,
     ACTION_SD_FILES_LOADED,
@@ -29,6 +28,7 @@ typedef enum {
     ACTION_FSEQ_NEXT,           // Skip to next file during playback
     ACTION_AUTO_TOGGLE,         // Toggle auto-loop mode
     ACTION_FSEQ_LOOP_COMPLETE,  // Current file finished one loop (for auto-advance)
+    ACTION_FSEQ_FPS_UPDATE,     // Update measured FPS during playback
 
     // Brightness events
     ACTION_BRIGHTNESS_UP,
@@ -37,14 +37,6 @@ typedef enum {
 
 // Action payload union
 typedef union {
-    // For ACTION_BOARD_ADDRESS_UPDATED
-    struct {
-        uint16_t adc_value;
-        uint8_t code;
-        uint16_t error;
-        uint16_t margin;
-    } board_address;
-
     // For ACTION_SD_CARD_ERROR
     struct {
         char message[24];
@@ -59,6 +51,11 @@ typedef union {
     struct {
         uint16_t fps;
     } rainbow;
+
+    // For ACTION_FSEQ_FPS_UPDATE
+    struct {
+        uint16_t fps;
+    } fseq_fps;
 } ActionPayload;
 
 // Action struct
@@ -91,23 +88,6 @@ static inline Action action_tick_1s(uint32_t timestamp) {
     return (Action){
         .type = ACTION_TICK_1S,
         .timestamp = timestamp,
-    };
-}
-
-static inline Action action_board_address_updated(uint32_t timestamp,
-                                                   uint16_t adc_value,
-                                                   uint8_t code,
-                                                   uint16_t error,
-                                                   uint16_t margin) {
-    return (Action){
-        .type = ACTION_BOARD_ADDRESS_UPDATED,
-        .timestamp = timestamp,
-        .payload.board_address = {
-            .adc_value = adc_value,
-            .code = code,
-            .error = error,
-            .margin = margin,
-        },
     };
 }
 
@@ -173,6 +153,14 @@ static inline Action action_fseq_loop_complete(uint32_t timestamp) {
     return (Action){
         .type = ACTION_FSEQ_LOOP_COMPLETE,
         .timestamp = timestamp,
+    };
+}
+
+static inline Action action_fseq_fps_update(uint32_t timestamp, uint16_t fps) {
+    return (Action){
+        .type = ACTION_FSEQ_FPS_UPDATE,
+        .timestamp = timestamp,
+        .payload.fseq_fps.fps = fps,
     };
 }
 

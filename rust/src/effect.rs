@@ -38,6 +38,12 @@ pub enum AppEffect {
 
     /// Render + trigger SD card rescan (read board_id from state)
     SdRescan,
+
+    /// Render + start FSEQ playback (read filename index from state)
+    FseqStart,
+
+    /// Render + stop FSEQ playback
+    FseqStop,
 }
 
 impl Effect for AppEffect {
