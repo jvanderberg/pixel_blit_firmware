@@ -6,11 +6,7 @@ use crate::state::AppState;
 pub struct ShutdownView;
 
 impl ShutdownView {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn render_to<D: Display>(&mut self, display: &mut D, _state: &AppState) {
+    pub fn render<D: Display>(display: &mut D, _state: &AppState) {
         display.text("Shutdown", 36, 10);
         display.text("Power off?", 32, 30);
         display.text("Sel: confirm", 26, 46);

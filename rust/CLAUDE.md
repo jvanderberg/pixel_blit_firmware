@@ -2,53 +2,66 @@
 
 ## Build Commands
 
-### Run Tests (on host)
 ```bash
+# Run tests (on host, no hardware)
 cargo test --no-default-features --features view-test --target aarch64-apple-darwin
-```
 
-### Build Firmware (release)
-```bash
+# Build firmware
 cargo build --release
-```
 
-### Check Firmware Size
-```bash
+# Check size
 arm-none-eabi-size target/thumbv8m.main-none-eabihf/release/pixel_blit_firmware
-```
 
-### Flash to Device
-```bash
+# Flash
 ./flash.sh
 ```
 
 ## Architecture
 
-This is a Redux-style firmware using the `reducto` crate for state management.
+Redux-style firmware using `reducto` crate.
 
-### Key Modules
-- `state.rs` - AppState and all state structs
-- `action.rs` - Action enum for all events
-- `reducer.rs` - Pure state transitions (no side effects)
-- `storage.rs` - Flash persistence (FlashSettings)
-- `views/` - Display rendering (uses Display trait abstraction)
-- `display.rs` - Display trait + MockDisplay for testing
+| Module | Purpose |
+|--------|---------|
+| `state.rs` | AppState and all state structs |
+| `action.rs` | Action enum for all events |
+| `reducer.rs` | Pure state transitions (no side effects!) |
+| `storage.rs` | Flash persistence, CRC32, debounced saves |
+| `display.rs` | Display trait + MockDisplay for testing |
+| `sdcard.rs` | SD card driver, config.csv parsing |
+| `led_driver/` | Token-based double buffering (see README.md) |
+| `views/` | Display rendering |
 
-### Feature Flags
-- `firmware` (default) - Includes embassy-rp, hardware drivers
-- `view-test` - Includes embedded-graphics for view testing
+## Feature Flags
 
-### Testing Strategy
-- Tests run on host (macOS) without firmware features
-- MockDisplay captures text for view assertions
-- Reducer tests verify pure state transitions
-- Storage tests verify CRC32 and settings validation
+- `firmware` (default) - Embassy, hardware drivers
+- `view-test` - embedded-graphics for MockDisplay
 
-## Flash Persistence
+## Testing
 
-Settings stored in last 4KB sector of 4MB flash:
-- Magic: 0x50425345 ("PBSE")
-- Version: 3
-- Fields: brightness, was_playing, playing_index, auto_loop, board_id
-- CRC32 validation (polynomial 0xEDB88320)
-- 2-second debounce on saves to reduce flash wear
+Tests run on host without firmware features:
+- `reducer_tests.rs` - State transitions
+- `storage.rs` - CRC32, settings validation
+- `led_driver/buffer.rs` - Bit-plane encoding
+- `led_driver/color.rs` - HSV conversion
+- `views/` - View rendering to MockDisplay
+
+## Key Patterns
+
+### Reducer Must Be Pure
+No hardware access, no I/O, no timers in reducer. Side effects go in main loop after dispatch.
+
+### Token-Based Buffers
+LED driver uses `WriteToken`/`ReadToken` passed through channels. See `led_driver/buffer.rs` and README.md for details.
+
+### Flash Persistence
+- Location: Last 4KB sector (offset 0x3FF000)
+- 2-second debounce before writing
+- CRC32 with polynomial 0xEDB88320
+
+### Spawn Tasks Gracefully
+```rust
+match my_task(args) {
+    Ok(token) => spawner.spawn(token),
+    Err(e) => defmt::error!("Failed: {:?}", e),
+}
+```

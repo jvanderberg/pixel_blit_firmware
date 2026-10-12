@@ -6,11 +6,7 @@ use crate::state::{AppState, BootState};
 pub struct BootView;
 
 impl BootView {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn render_to<D: Display>(&mut self, display: &mut D, state: &AppState) {
+    pub fn render<D: Display>(display: &mut D, state: &AppState) {
         match state.boot_state {
             BootState::Loading => {
                 display.text("Pixel Blit", 28, 20);

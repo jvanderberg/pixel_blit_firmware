@@ -5,3 +5,5 @@ build_test_board_config
 cblinken
 .DS_Store
 rp2350datasheet
+rust/target
+*.uf2

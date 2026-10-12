@@ -138,8 +138,9 @@ pub mod persist {
     use super::*;
     use defmt::info;
     use embassy_executor::Spawner;
-    use embassy_rp::flash::{Blocking, Flash, ERASE_SIZE};
-    use embassy_rp::peripherals::FLASH;
+    use embassy_rp::flash::{Async, Flash, ERASE_SIZE};
+    use embassy_rp::peripherals::{DMA_CH3, FLASH};
+    use embassy_rp::Peri;
     use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
     use embassy_sync::channel::Channel;
     use embassy_time::Duration;
@@ -161,15 +162,19 @@ pub mod persist {
     impl Settings {
         /// Initialize persistence: load state from flash and spawn save task.
         pub fn init(
-            flash: Flash<'static, FLASH, Blocking, FLASH_SIZE>,
+            flash: Peri<'static, FLASH>,
+            dma: Peri<'static, DMA_CH3>,
             spawner: &Spawner,
         ) -> (Self, AppState) {
-            // Load from flash first (need mutable borrow)
-            let mut flash = flash;
+            // Create flash driver with DMA support
+            let mut flash = Flash::<_, Async, FLASH_SIZE>::new(flash, dma);
             let loaded = load_from_flash(&mut flash);
 
             // Spawn save task (takes ownership of flash)
-            spawner.spawn(save_task(flash).unwrap());
+            match save_task(flash) {
+                Ok(token) => spawner.spawn(token),
+                Err(e) => defmt::error!("Failed to spawn save_task: {:?}", e),
+            }
 
             // Build initial state
             let mut state = AppState::new();
@@ -203,7 +208,7 @@ pub mod persist {
 
     /// Background task that handles debounced flash writes.
     #[embassy_executor::task]
-    async fn save_task(mut flash: Flash<'static, FLASH, Blocking, FLASH_SIZE>) {
+    async fn save_task(mut flash: Flash<'static, FLASH, Async, FLASH_SIZE>) {
         let mut last_saved: Option<FlashSettings> = None;
 
         loop {
@@ -225,7 +230,7 @@ pub mod persist {
         }
     }
 
-    fn load_from_flash(flash: &mut Flash<'_, FLASH, Blocking, FLASH_SIZE>) -> Option<FlashSettings> {
+    fn load_from_flash(flash: &mut Flash<'_, FLASH, Async, FLASH_SIZE>) -> Option<FlashSettings> {
         let mut buffer = [0u8; core::mem::size_of::<FlashSettings>()];
 
         if flash.blocking_read(SETTINGS_OFFSET, &mut buffer).is_err() {
@@ -247,7 +252,7 @@ pub mod persist {
     }
 
     /// Save settings to flash (internal)
-    fn save_to_flash(flash: &mut Flash<'_, FLASH, Blocking, FLASH_SIZE>, settings: &FlashSettings) {
+    fn save_to_flash(flash: &mut Flash<'_, FLASH, Async, FLASH_SIZE>, settings: &FlashSettings) {
         // Prepare page buffer (256 bytes, filled with 0xFF)
         let mut page = [0xFFu8; 256];
         let settings_bytes = unsafe {
@@ -258,19 +263,23 @@ pub mod persist {
         };
         page[..settings_bytes.len()].copy_from_slice(settings_bytes);
 
+        info!("Flash save: erasing sector at offset 0x{:x}, size 0x{:x}", SETTINGS_OFFSET, ERASE_SIZE);
+
         // Erase sector (4KB)
-        if let Err(_) = flash.blocking_erase(SETTINGS_OFFSET, SETTINGS_OFFSET + ERASE_SIZE as u32) {
-            info!("Flash erase failed");
+        if let Err(e) = flash.blocking_erase(SETTINGS_OFFSET, SETTINGS_OFFSET + ERASE_SIZE as u32) {
+            info!("Flash erase failed: {:?}", e);
             return;
         }
+
+        info!("Flash save: writing page");
 
         // Write page
-        if let Err(_) = flash.blocking_write(SETTINGS_OFFSET, &page) {
-            info!("Flash write failed");
+        if let Err(e) = flash.blocking_write(SETTINGS_OFFSET, &page) {
+            info!("Flash write failed: {:?}", e);
             return;
         }
 
-        info!("Settings saved to flash");
+        info!("Settings saved to flash successfully");
     }
 }
 

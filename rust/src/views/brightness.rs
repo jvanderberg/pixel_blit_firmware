@@ -9,11 +9,7 @@ use crate::state::{AppState, BRIGHTNESS_MAX};
 pub struct BrightnessView;
 
 impl BrightnessView {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn render_to<D: Display>(&mut self, display: &mut D, state: &AppState) {
+    pub fn render<D: Display>(display: &mut D, state: &AppState) {
         // Title
         display.text("Brightness", 32, 10);
 

@@ -25,6 +25,10 @@
 
 #define PB_DMA_CHANNEL 8  // Use channel 8 to avoid conflict with SD card
 
+// Timeout for waiting on DMA completion (10ms should be plenty for any frame)
+// Used to prevent permanent deadlock if semaphore is never released
+#define PB_SHOW_WAIT_TIMEOUT_US 10000
+
 // ============================================================================
 // Hardware state (internal)
 // ============================================================================
@@ -65,6 +69,19 @@ static int64_t reset_delay_complete(alarm_id_t id, void* user_data) {
     return 0;  // Don't reschedule
 }
 
+// Helper to schedule reset delay alarm with fallback on failure
+static void schedule_reset_delay(uint16_t delay_us) {
+    alarm_id_t alarm = add_alarm_in_us(delay_us, reset_delay_complete, NULL, true);
+    if (alarm < 0) {
+        // Alarm pool exhausted - release semaphore immediately to prevent deadlock
+        // This may cause LED timing issues but is better than hanging
+        hw_state.reset_alarm_id = 0;
+        sem_release(&hw_state.reset_delay_sem);
+    } else {
+        hw_state.reset_alarm_id = alarm;
+    }
+}
+
 static void __isr dma_complete_handler(void) {
     if (dma_hw->ints0 & (1u << PB_DMA_CHANNEL)) {
         // Clear interrupt
@@ -73,9 +90,10 @@ static void __isr dma_complete_handler(void) {
         // Cancel any pending alarm and start reset delay
         if (hw_state.reset_alarm_id) {
             cancel_alarm(hw_state.reset_alarm_id);
+            hw_state.reset_alarm_id = 0;
         }
         // WS2811/WS2812 reset delay from config (typically 200us)
-        hw_state.reset_alarm_id = add_alarm_in_us(hw_state.reset_us, reset_delay_complete, NULL, true);
+        schedule_reset_delay(hw_state.reset_us);
     }
 }
 
@@ -98,7 +116,7 @@ int pb_hw_init(pb_driver_t* driver) {
     hw_state.reset_alarm_id = 0;
 
     // Schedule initial reset delay so first frame waits for LEDs to be ready
-    hw_state.reset_alarm_id = add_alarm_in_us(300, reset_delay_complete, NULL, true);
+    schedule_reset_delay(300);
 
     // Calculate transfer size: pixels * 3 channels * 8 bit-planes
     hw_state.transfer_words = config->max_pixel_length * 3 * 8;
@@ -164,6 +182,10 @@ void pb_hw_deinit(void) {
         return;
     }
 
+    // Abort any in-flight DMA transfer before releasing resources
+    // This prevents DMA from accessing memory/PIO after we've released them
+    dma_channel_abort(PB_DMA_CHANNEL);
+
     // Disable interrupts
     irq_set_enabled(DMA_IRQ_0, false);
     dma_channel_set_irq0_enabled(PB_DMA_CHANNEL, false);
@@ -196,7 +218,17 @@ bool pb_hw_show(pb_driver_t* driver, bool blocking) {
 
     // Wait for previous transfer to complete (reset delay)
     if (blocking) {
-        sem_acquire_blocking(&hw_state.reset_delay_sem);
+        // Use timeout to prevent permanent deadlock
+        if (!sem_acquire_timeout_us(&hw_state.reset_delay_sem, PB_SHOW_WAIT_TIMEOUT_US)) {
+            // Timeout - force recovery
+            dma_channel_abort(PB_DMA_CHANNEL);
+            if (hw_state.reset_alarm_id) {
+                cancel_alarm(hw_state.reset_alarm_id);
+                hw_state.reset_alarm_id = 0;
+            }
+            sem_reset(&hw_state.reset_delay_sem, 1);
+            sem_acquire_blocking(&hw_state.reset_delay_sem);  // Now should succeed immediately
+        }
     } else {
         if (!sem_try_acquire(&hw_state.reset_delay_sem)) {
             return false;  // Previous transfer still in progress
@@ -236,7 +268,23 @@ void pb_hw_show_wait(void) {
     if (!hw_state.initialized) {
         return;
     }
-    sem_acquire_blocking(&hw_state.reset_delay_sem);
+
+    // Use timeout to prevent permanent deadlock if semaphore is never released
+    if (!sem_acquire_timeout_us(&hw_state.reset_delay_sem, PB_SHOW_WAIT_TIMEOUT_US)) {
+        // Timeout occurred - DMA may be stuck or alarm failed
+        // Force-release by aborting DMA and resetting semaphore
+        dma_channel_abort(PB_DMA_CHANNEL);
+
+        // Cancel any pending alarm
+        if (hw_state.reset_alarm_id) {
+            cancel_alarm(hw_state.reset_alarm_id);
+            hw_state.reset_alarm_id = 0;
+        }
+
+        // Reset semaphore to known state (available)
+        sem_reset(&hw_state.reset_delay_sem, 1);
+        return;
+    }
     sem_release(&hw_state.reset_delay_sem);
 }
 

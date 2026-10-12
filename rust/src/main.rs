@@ -20,7 +20,6 @@ use pixel_blit::display::Sh1106Display;
 use pixel_blit::effect::AppEffect;
 use pixel_blit::led_driver::{self, buffer};
 use pixel_blit::reducer::AppReducer;
-use pixel_blit::state::AppState;
 use pixel_blit::storage::persist::Settings;
 use pixel_blit::views::RootView;
 
@@ -34,7 +33,12 @@ embassy_rp::bind_interrupts!(pub struct Irqs {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let p = embassy_rp::init(Default::default());
+    // 250MHz overclock
+    use embassy_rp::clocks::ClockConfig;
+    let mut config = embassy_rp::config::Config::default();
+    config.clocks = ClockConfig::system_freq(250_000_000).unwrap();
+
+    let p = embassy_rp::init(config);
 
     // Brief delay for probe to connect
     Timer::after_millis(100).await;
@@ -83,7 +87,7 @@ async fn main(spawner: Spawner) {
     let view = RootView::new(display);
 
     // Create app
-    let mut app: App<AppState, Action, AppReducer, _> = App::new(view, state);
+    let mut app: App<AppReducer, _> = App::new(view, state);
     app.dispatch(Action::Boot);
 
     info!("Entering main loop");

@@ -9,11 +9,7 @@ use crate::state::{AppState, RunState};
 pub struct RainbowTestView;
 
 impl RainbowTestView {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn render_to<D: Display>(&mut self, display: &mut D, state: &AppState) {
+    pub fn render<D: Display>(display: &mut D, state: &AppState) {
         display.text("Rainbow Test", 24, 10);
 
         let mut line: String<32> = String::new();

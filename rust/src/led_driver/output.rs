@@ -1,23 +1,79 @@
 //! LED output hardware driver.
 //!
 //! This module handles the PIO and DMA for LED output.
-//! It's used internally by the runner module.
+//! It receives frames from the runner via channels and outputs them via DMA.
+//!
+//! # WS2812 Timing
+//!
+//! WS2812/WS2811 LEDs use a single-wire protocol with timing-based encoding:
+//!
+//! | Symbol | Parameter       | Min   | Typ   | Max   |
+//! |--------|-----------------|-------|-------|-------|
+//! | T0H    | 0-bit high time | 250ns | 400ns | 550ns |
+//! | T0L    | 0-bit low time  | 700ns | 850ns | 1000ns|
+//! | T1H    | 1-bit high time | 650ns | 800ns | 950ns |
+//! | T1L    | 1-bit low time  | 300ns | 450ns | 600ns |
+//! | Treset | Reset pulse     | 50µs  | -     | -     |
+//!
+//! Total bit time: ~1.25µs (800kHz)
+//!
+//! # PIO Program Design
+//!
+//! The PIO program outputs 32 pins in parallel with the following approach:
+//!
+//! ```text
+//!          T1 (3cy)      T2 (3cy)      T3 (4cy)
+//!        ┌─────────┐   ┌─────────┐   ┌──────────┐
+//!    1:  │  HIGH   │   │  HIGH   │   │   LOW    │  = 6 HIGH, 4 LOW
+//!        ├─────────┤   ├─────────┤   ├──────────┤
+//!    0:  │  HIGH   │   │   LOW   │   │   LOW    │  = 3 HIGH, 7 LOW
+//!        └─────────┘   └─────────┘   └──────────┘
+//! ```
+//!
+//! - T1: All pins HIGH (setup time, establishes pulse start)
+//! - T2: Data-dependent (pins follow bit values)
+//! - T3: All pins LOW (ensures proper low time)
+//!
+//! The clock divider is calculated at runtime from the system clock:
+//! - Divider = clk_sys_freq() / (800kHz × 10 cycles) = clk_sys_freq() / 8MHz
+//!
+//! At 150MHz: divider = 18.75, giving exact 800kHz timing.
 
+use embassy_rp::clocks::clk_sys_freq;
 use embassy_rp::dma::Channel as DmaChannel;
 use embassy_rp::pio::program::pio_asm;
 use embassy_rp::pio::{
     Common, Config, Direction, Instance, Pin, PioPin, ShiftConfig, ShiftDirection, StateMachine,
 };
 use embassy_rp::Peri;
-use fixed::traits::ToFixed;
-use fixed_macro::types::U56F8;
+use embassy_time::Timer;
+use fixed::types::U24F8;
 
-use super::runner;
+use super::buffer::{FRAME_CHANNEL, FREE_CHANNEL};
 
-// Clock divider calculation:
-// WS2812 bit rate: 800kHz, PIO cycles per bit: T1(3) + T2(3) + T3(4) + pull(1) = 11
-// Target PIO clock: 800_000 * 11 = 8.8MHz
-// RP2350 sys clock: 150MHz, divider = 150/8.8 = 17.045
+/// Target WS2812 bit rate in Hz
+const WS2812_BIT_RATE: u32 = 800_000;
+
+/// PIO cycles per bit (T1 + T2 + T3 = 3 + 3 + 4 = 10)
+const PIO_CYCLES_PER_BIT: u32 = 10;
+
+/// Calculate PIO clock divider for WS2812 timing.
+///
+/// Returns a fixed-point divider that achieves 800kHz bit rate.
+fn ws2812_clock_divider() -> U24F8 {
+    let sys_freq = clk_sys_freq();
+    let pio_freq = WS2812_BIT_RATE * PIO_CYCLES_PER_BIT; // 8MHz
+
+    // Calculate divider as fixed-point: sys_freq / pio_freq
+    // Use integer division with fractional part
+    let int_part = sys_freq / pio_freq;
+    let remainder = sys_freq % pio_freq;
+    // Scale remainder to get 8 fractional bits (256 = 2^8)
+    let frac_part = (remainder * 256) / pio_freq;
+
+    // Combine into U24F8 format (integer part shifted left 8 bits + fractional)
+    U24F8::from_bits((int_part << 8 | frac_part) as u32)
+}
 
 /// Low-level LED output driver.
 ///
@@ -74,14 +130,21 @@ impl<'d, PIO: Instance, const SM: usize> LedOutput<'d, PIO, SM> {
         P24: PioPin, P25: PioPin, P26: PioPin, P27: PioPin,
         P28: PioPin, P29: PioPin, P30: PioPin, P31: PioPin,
     {
-        // WS2811 parallel PIO program
-        // T1=3, T2=3, T3=4 cycles
+        // WS2812 parallel PIO program
+        // See module docs for timing analysis.
+        //
+        // Cycle count per instruction (including delay):
+        //   pull block:        1 cycle (blocks until data available)
+        //   mov pins, !null:   1 + 2 delay = 3 cycles (T1 phase)
+        //   out pins, 32:      1 + 2 delay = 3 cycles (T2 phase)
+        //   mov pins, null:    1 + 3 delay = 4 cycles (T3 phase)
+        // Total: 10 cycles per bit (+ 1 cycle pull, amortized over 32 bits)
         let prg = pio_asm!(
             ".wrap_target",
-            "pull block",           // Wait for data (pins stay LOW)
-            "mov pins, !null [2]",  // All pins HIGH for T1 (3 cycles)
-            "out pins, 32 [2]",     // Output data bits for T2 (3 cycles)
-            "mov pins, null [3]",   // All pins LOW for T3 (4 cycles)
+            "pull block",           // Wait for 32-bit word (pins stay LOW during wait)
+            "mov pins, !null [2]",  // T1: All pins HIGH (3 cycles)
+            "out pins, 32 [2]",     // T2: Output data bits to all 32 pins (3 cycles)
+            "mov pins, null [3]",   // T3: All pins LOW (4 cycles)
             ".wrap",
         );
 
@@ -131,8 +194,8 @@ impl<'d, PIO: Instance, const SM: usize> LedOutput<'d, PIO, SM> {
         let mut cfg = Config::default();
         cfg.use_program(&loaded, &pin_refs);
 
-        // Clock divider for 800kHz bit rate
-        cfg.clock_divider = U56F8!(17.045).to_fixed();
+        // Clock divider calculated from system clock for exact 800kHz timing
+        cfg.clock_divider = ws2812_clock_divider();
 
         // Shift out right, auto-pull disabled (we use explicit pull)
         cfg.shift_out = ShiftConfig {
@@ -159,26 +222,20 @@ impl<'d, PIO: Instance, const SM: usize> LedOutput<'d, PIO, SM> {
     /// Create LED output for GPIO 0-31 using direct register access.
     ///
     /// This bypasses embassy's Pin abstraction to avoid stack overflow from 32 Pin structs.
-    ///
-    /// # Safety
-    /// Caller must ensure GPIO 0-31 are not used elsewhere.
     pub fn new_parallel_32(
         common: &mut Common<'d, PIO>,
         mut sm: StateMachine<'d, PIO, SM>,
     ) -> Self {
-        // Configure GPIO 0-31 for PIO output
-        // Safety: We're taking exclusive control of these pins for LED output
-        unsafe {
-            Self::configure_gpio_for_pio();
-        }
+        // Configure GPIO 0-31 for PIO output via PAC
+        configure_gpio_for_pio();
 
-        // Load PIO program
+        // WS2812 parallel PIO program (same as LedOutput::new, see module docs)
         let prg = pio_asm!(
             ".wrap_target",
-            "pull block",
-            "mov pins, !null [2]",
-            "out pins, 32 [2]",
-            "mov pins, null [3]",
+            "pull block",           // Wait for 32-bit word
+            "mov pins, !null [2]",  // T1: All pins HIGH (3 cycles)
+            "out pins, 32 [2]",     // T2: Output data bits (3 cycles)
+            "mov pins, null [3]",   // T3: All pins LOW (4 cycles)
             ".wrap",
         );
         let loaded = common.load_program(&prg.program);
@@ -187,16 +244,11 @@ impl<'d, PIO: Instance, const SM: usize> LedOutput<'d, PIO, SM> {
         let mut cfg = Config::default();
         cfg.use_program(&loaded, &[]);  // no side-set pins
 
-        // Set OUT pins directly: base=0, count=32
-        // Safety: We've configured GPIO 0-31 for PIO above
-        unsafe {
-            let mut pins = cfg.get_pins();
-            pins.out_base = 0;
-            pins.out_count = 32;
-            cfg.set_pins(pins);
-        }
+        // Set OUT pins directly: base=0, count=32 via PAC
+        set_pinctrl_out(&mut cfg);
 
-        cfg.clock_divider = U56F8!(17.045).to_fixed();
+        // Clock divider calculated from system clock for exact 800kHz timing
+        cfg.clock_divider = ws2812_clock_divider();
         cfg.shift_out = ShiftConfig {
             auto_fill: false,
             threshold: 32,
@@ -205,100 +257,92 @@ impl<'d, PIO: Instance, const SM: usize> LedOutput<'d, PIO, SM> {
         cfg.fifo_join = embassy_rp::pio::FifoJoin::TxOnly;
 
         sm.set_config(&cfg);
-
-        // Set pin directions to output via PIO
-        // Safety: Direct register access for pin directions
-        unsafe {
-            Self::set_pin_dirs_out(&sm);
-        }
-
         sm.set_enable(true);
 
         Self { sm }
     }
+}
 
-    /// Configure GPIO 0-31 pads and function select for PIO1.
-    unsafe fn configure_gpio_for_pio() {
-        use embassy_rp::pac;
-        use embassy_rp::pac::io::vals::Oeover;
+/// Configure GPIO 0-31 pads and function select for PIO1.
+fn configure_gpio_for_pio() {
+    use embassy_rp::pac;
+    use embassy_rp::pac::io::vals::Oeover;
 
-        // PIO1 function select = 7 on RP2350
-        const PIO1_FUNCSEL: u8 = 7;
+    // PIO1 function select = 7 on RP2350
+    const PIO1_FUNCSEL: u8 = 7;
 
-        for pin in 0u8..32 {
-            let gpio = pac::IO_BANK0.gpio(pin as usize);
-            let pads = pac::PADS_BANK0.gpio(pin as usize);
+    for pin in 0u8..32 {
+        let gpio = pac::IO_BANK0.gpio(pin as usize);
+        let pads = pac::PADS_BANK0.gpio(pin as usize);
 
-            // Set function select to PIO1, and force OE high
-            // OEOVER::ENABLE forces output enable, overriding PIO's OE signal
-            gpio.ctrl().write(|w| {
-                w.set_funcsel(PIO1_FUNCSEL);
-                w.set_oeover(Oeover::ENABLE);
-            });
+        // Set function select to PIO1, and force OE high
+        // OEOVER::ENABLE forces output enable, overriding PIO's OE signal
+        gpio.ctrl().write(|w| {
+            w.set_funcsel(PIO1_FUNCSEL);
+            w.set_oeover(Oeover::ENABLE);
+        });
 
-            // Configure pad: output enabled, schmitt trigger, normal slew
-            pads.write(|w| {
-                w.set_od(false);      // Output enable (not disabled)
-                w.set_ie(true);       // Input enable (for reading back)
-                w.set_schmitt(true);  // Schmitt trigger
-                w.set_slewfast(false); // Normal slew rate
-                w.set_pue(false);     // No pull-up
-                w.set_pde(false);     // No pull-down
-            });
-        }
+        // Configure pad: output enabled, schmitt trigger, normal slew
+        pads.write(|w| {
+            w.set_od(false);      // Output enable (not disabled)
+            w.set_ie(true);       // Input enable (for reading back)
+            w.set_schmitt(true);  // Schmitt trigger
+            w.set_slewfast(false); // Normal slew rate
+            w.set_pue(false);     // No pull-up
+            w.set_pde(false);     // No pull-down
+        });
     }
+}
 
-    /// Set GPIO 0-31 as outputs via PIO pin direction register.
-    unsafe fn set_pin_dirs_out<const SM_IDX: usize>(_sm: &StateMachine<'d, PIO, SM_IDX>) {
-        // Pin directions are now forced via OEOVER in configure_gpio_for_pio()
-        // No additional action needed here
-    }
+/// Set PINCTRL for 32 output pins starting at GPIO 0.
+fn set_pinctrl_out<PIO: Instance>(cfg: &mut Config<'_, PIO>) {
+    // Access pins config and set OUT base/count
+    let mut pins = cfg.get_pins();
+    pins.out_base = 0;
+    pins.out_count = 32;
+    // Safety: We've configured GPIO 0-31 for PIO1 in configure_gpio_for_pio()
+    // before calling this function. The pins are dedicated to LED output.
+    unsafe { cfg.set_pins(pins) };
 }
 
 /// Run the DMA output task.
 ///
 /// This task:
-/// 1. Waits for FRAME_READY signal
-/// 2. Swaps buffers
-/// 3. Signals BUFFER_FREE (writer can start next frame)
-/// 4. Pushes data via DMA (awaits completion)
-/// 5. Loops
-///
-/// Call this from an embassy task.
+/// 1. Waits for ReadToken from FRAME_CHANNEL
+/// 2. Gets DMA slice directly from token (no copying!)
+/// 3. Pushes data via DMA
+/// 4. Adds WS2812 reset delay
+/// 5. Returns WriteToken to FREE_CHANNEL
+/// 6. Loops
 pub async fn run_output_loop<'d, PIO: Instance, const SM: usize, DMA: DmaChannel>(
     mut output: LedOutput<'d, PIO, SM>,
     mut dma: Peri<'d, DMA>,
 ) -> ! {
-    // Signal initial buffer free
-    runner::signal_buffer_free();
-
-    let mut frame_count: u32 = 0;
-
     loop {
-        // Wait for writer to signal frame ready
-        defmt::trace!("Output: waiting for frame ready");
-        runner::wait_frame_ready().await;
-        defmt::trace!("Output: frame ready received");
+        // Wait for a frame
+        let read_token = FRAME_CHANNEL.receive().await;
+        let start = embassy_time::Instant::now();
 
-        // Safety: We have exclusive access to buffer after FRAME_READY
-        let buffer = unsafe { runner::get_buffer() };
+        // Get DMA slice directly from token - no copying needed!
+        let dma_data = read_token.as_dma_slice();
+        let dma_len = read_token.dma_len();
 
-        // Swap buffers - back becomes front for DMA
-        buffer.swap();
+        // Push via DMA
+        if dma_len > 0 {
+            output.dma_push(dma.reborrow(), dma_data).await;
+            let dma_time = start.elapsed().as_micros();
 
-        // Signal writer that back buffer is free
-        // Writer can now start preparing next frame
-        runner::signal_buffer_free();
+            // WS2812 reset delay (200µs minimum, use 250 for margin)
+            Timer::after_micros(250).await;
+            let total_time = start.elapsed().as_micros();
 
-        // Get DMA data from front buffer
-        let data = buffer.as_dma_words();
-
-        frame_count = frame_count.wrapping_add(1);
-        if frame_count % 600 == 0 {
-            defmt::info!("Output: DMA frame {}, {} words", frame_count, data.len());
+            if total_time > 15000 {
+                defmt::info!("OUTPUT SPIKE: total={}us dma={}us len={}", total_time, dma_time, dma_len);
+            }
         }
 
-        // Push via DMA - this awaits but doesn't block writer
-        output.dma_push(dma.reborrow(), data).await;
+        // Return the buffer
+        let write_token = read_token.into_write_token();
+        FREE_CHANNEL.send(write_token).await;
     }
 }

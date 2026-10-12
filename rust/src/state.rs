@@ -252,4 +252,42 @@ impl AppState {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Returns the current screen to display based on state.
+    pub fn current_screen(&self) -> Screen {
+        if !self.is_powered_on {
+            return Screen::PoweredOff;
+        }
+        if self.boot_state != BootState::Ready {
+            return Screen::Boot;
+        }
+        if !self.in_detail_view {
+            return Screen::MainMenu;
+        }
+
+        match self.menu_selection {
+            MenuEntry::Info => Screen::Info,
+            MenuEntry::BoardAddress => Screen::BoardAddress,
+            MenuEntry::SdCard => Screen::SdCard,
+            MenuEntry::RainbowTest => Screen::RainbowTest,
+            MenuEntry::StringLength => Screen::StringLength,
+            MenuEntry::Brightness => Screen::Brightness,
+            MenuEntry::Shutdown => Screen::Shutdown,
+        }
+    }
+}
+
+/// Current screen to display
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Screen {
+    PoweredOff,
+    Boot,
+    MainMenu,
+    Info,
+    BoardAddress,
+    SdCard,
+    RainbowTest,
+    StringLength,
+    Brightness,
+    Shutdown,
 }

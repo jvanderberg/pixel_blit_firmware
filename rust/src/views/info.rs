@@ -9,11 +9,7 @@ use crate::state::{AppState, NUM_STRINGS};
 pub struct InfoView;
 
 impl InfoView {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn render_to<D: Display>(&mut self, display: &mut D, state: &AppState) {
+    pub fn render<D: Display>(display: &mut D, state: &AppState) {
         display.text("String Info", 28, 10);
 
         // Show 5 items at a time

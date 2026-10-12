@@ -167,7 +167,8 @@ void side_effects_apply(const HardwareContext* hw,
     flash_settings_check_save(new_state->brightness_level,
                               new_state->sd_card.is_playing,
                               new_state->sd_card.playing_index,
-                              new_state->sd_card.auto_loop);
+                              new_state->sd_card.auto_loop,
+                              new_state->board_id);
 }
 
 bool side_effects_tick(const HardwareContext* hw, const AppState* state) {

@@ -60,8 +60,14 @@ pub fn init(spawner: &Spawner, usb: Peri<'static, USB>) {
     let cdc_class = CdcAcmClass::new(&mut builder, CDC_STATE.init(CdcState::new()), 64);
     let usb_device = builder.build();
 
-    spawner.spawn(usb_task(usb_device).unwrap());
-    spawner.spawn(cdc_task(cdc_class).unwrap());
+    match usb_task(usb_device) {
+        Ok(token) => spawner.spawn(token),
+        Err(e) => defmt::error!("Failed to spawn usb_task: {:?}", e),
+    }
+    match cdc_task(cdc_class) {
+        Ok(token) => spawner.spawn(token),
+        Err(e) => defmt::error!("Failed to spawn cdc_task: {:?}", e),
+    }
 }
 
 #[embassy_executor::task]

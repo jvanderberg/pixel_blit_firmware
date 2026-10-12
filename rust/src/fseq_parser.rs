@@ -155,8 +155,8 @@ pub struct FseqParser {
     temp_pixel: [u8; 3],
     /// Number of bytes in temp_pixel (0, 1, 2)
     temp_pixel_idx: u8,
-    /// Accumulated pixels from current chunk (512 bytes / 3 = ~170 pixels max)
-    pixels: heapless::Vec<FseqPixel, 256>,
+    /// Accumulated pixels for entire frame (up to ~3000 pixels for 32 strings × ~100 pixels)
+    pixels: heapless::Vec<FseqPixel, 4096>,
     /// Overflow buffer for bytes that arrive after frame boundary
     overflow_buf: [u8; 512],
     /// Number of valid bytes in overflow buffer

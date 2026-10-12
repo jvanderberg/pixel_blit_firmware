@@ -15,14 +15,24 @@ Rust firmware for the Pixel Blit 32-channel LED controller using Embassy async f
 ```
 src/
 ├── lib.rs              # Library root (exports testable modules)
-├── main.rs             # Firmware entry point
+├── main.rs             # Firmware entry point, task spawning
 ├── state.rs            # AppState and types
 ├── action.rs           # Action enum
-├── reducer.rs          # Pure state transitions
+├── reducer.rs          # Pure state transitions (no side effects)
 ├── reducer_tests.rs    # Host-runnable tests
-├── usb.rs              # USB CDC for bootloader
+├── storage.rs          # Flash persistence (settings, CRC32)
+├── display.rs          # Display trait + MockDisplay for testing
+├── sdcard.rs           # SD card driver, config.csv parsing
+├── usb.rs              # USB CDC for debug output
+├── led_driver/         # Parallel WS2812 driver
+│   ├── mod.rs          # Module exports
+│   ├── buffer.rs       # Token-based double buffering
+│   ├── runner.rs       # Frame generator loop
+│   ├── output.rs       # PIO/DMA output
+│   └── color.rs        # RGB/HSV utilities
 └── views/              # Display views
     ├── mod.rs          # RootView dispatcher
+    ├── boot.rs         # Loading/error screens
     ├── main_menu.rs
     ├── info.rs
     ├── board_address.rs
@@ -32,6 +42,11 @@ src/
     ├── sd_card.rs
     └── shutdown.rs
 ```
+
+## Feature Flags
+
+- `firmware` (default) - Full firmware with Embassy, hardware drivers
+- `view-test` - Enables embedded-graphics for MockDisplay testing
 
 ## Prerequisites
 
@@ -191,11 +206,61 @@ DEFMT_LOG = "debug"
 ## Hardware
 
 - **MCU**: RP2350B (Cortex-M33, thumbv8m.main-none-eabihf)
-- **GPIO 46-47**: I2C1 for SH1106 OLED (SDA=46, SCL=47)
-- **GPIO 0-31**: LED string outputs
+- **GPIO 0-31**: LED string outputs (directly mapped: String N = GPIO N)
+- **GPIO 36-39**: SPI0 for SD card (MISO=36, CS=37, SCK=38, MOSI=39)
 - **GPIO 42**: IR receiver
 - **GPIO 43**: Select button
 - **GPIO 45**: Next button
+- **GPIO 46-47**: I2C1 for SH1106 OLED (SDA=46, SCL=47)
+
+## Flash Persistence
+
+Settings stored in last 4KB sector of 4MB flash:
+- Magic: `0x50425345` ("PBSE")
+- Version: 3
+- Fields: brightness, was_playing, playing_index, auto_loop, board_id
+- CRC32 validation (polynomial 0xEDB88320, same as C firmware)
+- 2-second debounce on saves to reduce flash wear
+
+## LED Driver Architecture
+
+The LED driver outputs to 32 parallel WS2812 strings using PIO and DMA. It uses a
+**token-based double-buffer system** for safe concurrent access without runtime overhead.
+
+### Double Buffering with Tokens
+
+```
+Runner Task                      Output Task
+     |                                |
+[WriteToken(0)]                  [waiting]
+     |                                |
+ write pixels                         |
+     |                                |
+ send ReadToken(0) ──────────►  receive ReadToken(0)
+     |                                |
+ receive WriteToken(1) ◄──────  [DMA output buffer 0]
+     |                                |
+ write pixels                    send WriteToken(0)
+     |                                |
+```
+
+- `WriteToken` grants exclusive write access to a buffer
+- `ReadToken` grants exclusive read access (for DMA)
+- Channels enforce the protocol - tokens can't be duplicated
+- Zero-copy: DMA reads directly from static buffers (~98KB total)
+
+### Why Tokens Instead of Mutex?
+
+A naive Mutex approach would require either:
+1. Hold mutex during DMA (blocks writer for 1.5ms per frame)
+2. Copy buffer while holding mutex briefly (wastes 98KB RAM)
+
+The token system gives us:
+- No blocking (async channel handoff)
+- No copying (direct buffer access)
+- Compile-time safety (can't access buffer without token)
+
+See `led_driver/buffer.rs` for implementation details.
 
 ## Dependencies
 

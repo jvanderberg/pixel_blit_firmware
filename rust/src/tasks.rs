@@ -8,11 +8,12 @@ use embassy_rp::spi::{Config as SpiConfig, Spi};
 use embassy_rp::Peri;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use reducto::ActionChannel;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::String;
 
 use pixel_blit::action::Action;
-use pixel_blit::fseq_parser::{FseqLayout, FseqParser};
+use pixel_blit::fseq_parser::{FseqLayout, FseqHeader};
 use pixel_blit::led_driver::{self, FrameStringConfig, WriteToken};
 use pixel_blit::led_driver::buffer::{FRAME_CHANNEL, FREE_CHANNEL, FSEQ_REQUEST_CHANNEL, FSEQ_TOKEN_CHANNEL, FSEQ_RETURN_CHANNEL};
 use pixel_blit::sdcard::hw::SdReader;
@@ -22,7 +23,7 @@ use embedded_sdmmc::{Mode, VolumeIdx};
 use crate::Irqs;
 
 /// Channel for dispatching actions to the main loop.
-pub static ACTION_CHANNEL: Channel<CriticalSectionRawMutex, Action, 4> = Channel::new();
+pub static ACTION_CHANNEL: ActionChannel<Action, 4> = ActionChannel::new();
 
 /// Channel to trigger SD card rescan.
 pub static SD_RESCAN_CHANNEL: Channel<CriticalSectionRawMutex, u8, 1> = Channel::new();
@@ -84,8 +85,8 @@ pub async fn tick_task() {
 // SD Card Task
 // ============================================================================
 
-/// SPI frequency for SD card (25 MHz)
-const SD_SPI_SPEED_HZ: u32 = 25_000_000;
+/// SPI frequency for SD card (40 MHz)
+const SD_SPI_SPEED_HZ: u32 = 40_000_000;
 
 #[embassy_executor::task]
 pub async fn sd_card_task(
@@ -274,9 +275,8 @@ async fn play_fseq(
         }
     }
 
-    // Initialize parser
-    let mut parser = FseqParser::new(layout);
-    let header = match parser.parse_header(&header_buf) {
+    // Parse header directly (no need for full parser - data is raw RGB)
+    let header = match FseqHeader::parse(&header_buf) {
         Some(h) => h,
         None => {
             error!("FSEQ: invalid header (not FSEQ v2)");
@@ -317,21 +317,25 @@ async fn play_fseq(
     let mut token = FSEQ_TOKEN_CHANNEL.receive().await;
     info!("FSEQ: got buffer, starting playback @ {} fps", fps);
 
-    // Timing
-    let frame_interval = Duration::from_micros(1_000_000 / fps as u64);
-    let mut last_frame_time = Instant::now();
+    // Timing (FPS limiting disabled for testing)
+    // let frame_interval = Duration::from_micros(1_000_000 / fps as u64);
+    // let last_frame_time = Instant::now();
 
-    // FPS measurement
-    let mut fps_frame_count: u32 = 0;
-    let mut fps_last_time = Instant::now();
+    // FPS measurement - accumulate 100 frames
+    let mut total_loop_time: u64 = 0;
+    let mut min_loop_time: u64 = u64::MAX;
+    let mut max_loop_time: u64 = 0;
 
     // Playback state
     let mut frames_played: u32 = 0;
     let frame_size = file_channels as usize; // Bytes per frame = channel count
-    // Buffer for one frame (max ~10KB for 32 strings * ~100 pixels * 3 channels)
-    let mut frame_buffer = [0u8; 12000];
 
-    // Configure buffer once (doesn't change per frame)
+    // Double-buffered frame reads - read next frame while DMA outputs current
+    let mut frame_buf_a = [0u8; 12000];
+    let mut frame_buf_b = [0u8; 12000];
+    let mut use_buf_a = true;
+
+    // Configure LED buffer (first buffer)
     {
         let buffer = token.get_mut();
         for (i, cfg) in frame_configs.iter().enumerate() {
@@ -339,7 +343,64 @@ async fn play_fseq(
         }
     }
 
+    // Send first frame and get second buffer to configure it too
+    // (double buffering means we need to configure BOTH buffers)
+    {
+        let buffer = token.get_mut();
+        buffer.clear();
+    }
+    let read_token = token.into_read_token();
+    FRAME_CHANNEL.send(read_token).await;
+    let mut token = FREE_CHANNEL.receive().await;
+    {
+        let buffer = token.get_mut();
+        for (i, cfg) in frame_configs.iter().enumerate() {
+            buffer.set_string_config(i as u8, *cfg);
+        }
+    }
+
+    // Timing for logging
+    let mut read_time: Duration;
+    let mut parse_time: Duration;
+    let mut wait_time: Duration;
+
+    // Read first frame, parse it, send it, THEN start the overlapped loop
+    let mut current_bytes = match file.read(&mut frame_buf_a[..frame_size]) {
+        Ok(n) if n > 0 => n,
+        Ok(_) => {
+            error!("FSEQ: empty file");
+            FSEQ_RETURN_CHANNEL.send(token).await;
+            return;
+        }
+        Err(_) => {
+            error!("FSEQ: initial read error");
+            FSEQ_RETURN_CHANNEL.send(token).await;
+            return;
+        }
+    };
+
+    // Parse and send first frame to start the DMA pipeline
+    {
+        let buffer = token.get_mut();
+        let mut offset = 0;
+        for string_idx in 0..layout.num_strings {
+            let string_len = layout.string_lengths[string_idx as usize] as usize;
+            let byte_count = string_len * 3;
+            if offset + byte_count <= current_bytes {
+                buffer.set_string_pixels(string_idx, &frame_buf_a[offset..offset + byte_count]);
+                offset += byte_count;
+            }
+        }
+    }
+    frames_played += 1;
+
+    // Send first frame - DMA starts
+    let read_token = token.into_read_token();
+    FRAME_CHANNEL.send(read_token).await;
+
     'playback: loop {
+        let loop_start = Instant::now();
+
         // Check for stop command
         if let Ok(cmd) = FSEQ_COMMAND_CHANNEL.try_receive() {
             match cmd {
@@ -354,13 +415,12 @@ async fn play_fseq(
             }
         }
 
-        // Check for loop completion
+        // Check for loop completion before reading next
         if frames_played >= frame_count {
             info!("FSEQ: loop complete ({} frames)", frames_played);
             ACTION_CHANNEL.send(Action::FseqLoopComplete).await;
 
             // Reset for next loop - seek back to data start
-            parser.reset();
             if file.seek_from_start(channel_data_offset).is_err() {
                 error!("FSEQ: failed to seek for loop");
                 break 'playback;
@@ -368,79 +428,91 @@ async fn play_fseq(
             frames_played = 0;
         }
 
-        // Clear LED buffer for new frame
-        token.get_mut().clear();
-
-        // Read one frame from file - with timing
+        // READ next frame - DMA for previous frame runs during this!
         let read_start = Instant::now();
-        let bytes_read = match file.read(&mut frame_buffer[..frame_size]) {
-            Ok(n) => n,
+        let read_buf = if use_buf_a {
+            &mut frame_buf_a[..frame_size]
+        } else {
+            &mut frame_buf_b[..frame_size]
+        };
+        current_bytes = match file.read(read_buf) {
+            Ok(n) if n > 0 => n,
+            Ok(_) => {
+                warn!("FSEQ: unexpected EOF");
+                break 'playback;
+            }
             Err(_) => {
                 error!("FSEQ: read error");
                 break 'playback;
             }
         };
-        let read_time = Instant::now().duration_since(read_start);
+        read_time = read_start.elapsed();
 
-        if bytes_read == 0 {
-            warn!("FSEQ: unexpected EOF, looping");
-            parser.reset();
-            if file.seek_from_start(channel_data_offset).is_err() {
-                break 'playback;
-            }
-            frames_played = 0;
-            continue;
-        }
+        // WAIT for token - DMA should be done or nearly done
+        let wait_start = Instant::now();
+        let mut token = FREE_CHANNEL.receive().await;
+        wait_time = wait_start.elapsed();
 
-        // Parse frame and write pixels to buffer - with timing
+        // PARSE into the token we just received
         let parse_start = Instant::now();
-        parser.push(&frame_buffer[..bytes_read]);
         {
             let buffer = token.get_mut();
-            for px in parser.pixels() {
-                buffer.set_pixel(px.string, px.pixel, px.color);
+            let current_data = if use_buf_a {
+                &frame_buf_a[..current_bytes]
+            } else {
+                &frame_buf_b[..current_bytes]
+            };
+            let mut offset = 0;
+            for string_idx in 0..layout.num_strings {
+                let string_len = layout.string_lengths[string_idx as usize] as usize;
+                let byte_count = string_len * 3;
+                if offset + byte_count <= current_data.len() {
+                    buffer.set_string_pixels(string_idx, &current_data[offset..offset + byte_count]);
+                    offset += byte_count;
+                }
             }
         }
-        parser.clear_pixels();
-        let parse_time = Instant::now().duration_since(parse_start);
-
-        // Log timing every 100 frames
-        if frames_played % 100 == 0 {
-            info!("FSEQ: read={}us parse={}us", read_time.as_micros(), parse_time.as_micros());
-        }
+        parse_time = parse_start.elapsed();
 
         frames_played += 1;
-        fps_frame_count += 1;
 
-        // Update FPS measurement every second
-        let elapsed = Instant::now().duration_since(fps_last_time);
-        if elapsed.as_millis() >= 1000 {
-            let measured_fps = (fps_frame_count as u64 * 1000) / elapsed.as_millis();
-            ACTION_CHANNEL.send(Action::FseqFpsUpdate { fps: measured_fps as u16 }).await;
-            fps_frame_count = 0;
-            fps_last_time = Instant::now();
-        }
-
-        // Log progress sparingly
-        if frames_played <= 3 || frames_played % 500 == 0 {
-            info!("FSEQ: frame {}", frames_played);
-        }
-
-        // FPS limiting - wait until frame time
-        let target_time = last_frame_time + frame_interval;
-        let now = Instant::now();
-        if now < target_time {
-            Timer::after(target_time - now).await;
-        }
-        last_frame_time = target_time; // Drift correction
-
-        // Send frame to output, get next buffer
+        // SEND frame to output - starts DMA for this frame
+        let send_start = Instant::now();
         let read_token = token.into_read_token();
         FRAME_CHANNEL.send(read_token).await;
-        token = FREE_CHANNEL.receive().await;
+        let send_time = send_start.elapsed();
+
+        // Swap buffers for next iteration
+        use_buf_a = !use_buf_a;
+
+        // Accumulate loop time at very end
+        let loop_time = loop_start.elapsed().as_micros() as u64;
+        total_loop_time += loop_time;
+        if loop_time < min_loop_time { min_loop_time = loop_time; }
+        if loop_time > max_loop_time { max_loop_time = loop_time; }
+
+        // Spike logging disabled for testing
+        // if loop_time > 20000 {
+        //     info!("SPIKE: ...");
+        // }
+
+        // Every 100 frames, report FPS
+        if frames_played % 100 == 0 {
+            let avg_frame_us = total_loop_time / 100;
+            let measured_fps = if avg_frame_us > 0 { 1_000_000 / avg_frame_us } else { 0 };
+            ACTION_CHANNEL.try_send(Action::FseqFpsUpdate { fps: measured_fps as u16 }).ok();
+            // Log every 1000 frames only
+            if frames_played % 1000 == 0 {
+                info!("FSEQ: avg={}us min={}us max={}us fps={}", avg_frame_us, min_loop_time, max_loop_time, measured_fps);
+            }
+            total_loop_time = 0;
+            min_loop_time = u64::MAX;
+            max_loop_time = 0;
+        }
     }
 
-    // File closes automatically when dropped here
+    // Token was sent before breaking, need to receive it
+    let mut token = FREE_CHANNEL.receive().await;
 
     // Clear final frame before returning control
     token.get_mut().clear();

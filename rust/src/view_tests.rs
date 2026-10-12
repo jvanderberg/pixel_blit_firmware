@@ -13,10 +13,9 @@ mod tests {
     #[test]
     fn main_menu_shows_title() {
         let mut display = MockDisplay::new();
-        let mut view = MainMenuView::new();
         let state = AppState::default();
 
-        view.render_to(&mut display, &state);
+        MainMenuView::render(&mut display, &state);
 
         assert!(display.contains("Pixel Blit"));
     }
@@ -24,14 +23,13 @@ mod tests {
     #[test]
     fn main_menu_shows_selected_item() {
         let mut display = MockDisplay::new();
-        let mut view = MainMenuView::new();
 
         // Select Brightness menu
         let state = AppState {
             menu_selection: MenuEntry::Brightness,
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        MainMenuView::render(&mut display, &state);
 
         assert!(display.contains("> Brightness"));
     }
@@ -39,7 +37,6 @@ mod tests {
     #[test]
     fn main_menu_shows_all_entries() {
         let mut display = MockDisplay::new();
-        let mut view = MainMenuView::new();
 
         for entry in [
             MenuEntry::Info,
@@ -55,7 +52,7 @@ mod tests {
                 menu_selection: entry,
                 ..AppState::default()
             };
-            view.render_to(&mut display, &state);
+            MainMenuView::render(&mut display, &state);
             assert!(
                 display.contains(entry.label()),
                 "Menu should show '{}'",
@@ -71,20 +68,18 @@ mod tests {
     #[test]
     fn info_view_shows_title() {
         let mut display = MockDisplay::new();
-        let mut view = InfoView::new();
         let state = AppState::default();
 
-        view.render_to(&mut display, &state);
+        InfoView::render(&mut display, &state);
         assert!(display.contains("String Info"));
     }
 
     #[test]
     fn info_view_shows_string_config() {
         let mut display = MockDisplay::new();
-        let mut view = InfoView::new();
         let state = AppState::default();
 
-        view.render_to(&mut display, &state);
+        InfoView::render(&mut display, &state);
         // Should show at least one string entry with format "S00: Npx ORDER"
         assert!(display.contains("S00:"));
     }
@@ -92,7 +87,6 @@ mod tests {
     #[test]
     fn info_view_shows_exit_option() {
         let mut display = MockDisplay::new();
-        let mut view = InfoView::new();
 
         // Scroll to exit option (after all strings)
         let state = AppState {
@@ -101,7 +95,7 @@ mod tests {
             },
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        InfoView::render(&mut display, &state);
         assert!(display.contains("[Exit]"));
     }
 
@@ -112,30 +106,27 @@ mod tests {
     #[test]
     fn board_address_shows_title() {
         let mut display = MockDisplay::new();
-        let mut view = BoardAddressView::new();
         let state = AppState::default();
 
-        view.render_to(&mut display, &state);
+        BoardAddressView::render(&mut display, &state);
         assert!(display.contains("Board Address"));
     }
 
     #[test]
     fn board_address_shows_current_id() {
         let mut display = MockDisplay::new();
-        let mut view = BoardAddressView::new();
 
         let state = AppState {
             board_id: 5,
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        BoardAddressView::render(&mut display, &state);
         assert!(display.contains("Board ID: 5"));
     }
 
     #[test]
     fn board_address_shows_all_ids() {
         let mut display = MockDisplay::new();
-        let mut view = BoardAddressView::new();
 
         for id in 0..=BOARD_ID_MAX {
             display.clear_buffer();
@@ -143,7 +134,7 @@ mod tests {
                 board_id: id,
                 ..AppState::default()
             };
-            view.render_to(&mut display, &state);
+            BoardAddressView::render(&mut display, &state);
             let expected = format!("Board ID: {}", id);
             assert!(
                 display.contains(&expected),
@@ -160,37 +151,34 @@ mod tests {
     #[test]
     fn brightness_shows_title() {
         let mut display = MockDisplay::new();
-        let mut view = BrightnessView::new();
         let state = AppState::default();
 
-        view.render_to(&mut display, &state);
+        BrightnessView::render(&mut display, &state);
         assert!(display.contains("Brightness"));
     }
 
     #[test]
     fn brightness_shows_level() {
         let mut display = MockDisplay::new();
-        let mut view = BrightnessView::new();
 
         let state = AppState {
             brightness_level: 7,
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        BrightnessView::render(&mut display, &state);
         assert!(display.contains("Level: 7"));
     }
 
     #[test]
     fn brightness_bar_grows_with_level() {
         let mut display = MockDisplay::new();
-        let mut view = BrightnessView::new();
 
         // Render at min brightness
         let state_min = AppState {
             brightness_level: BRIGHTNESS_MIN,
             ..AppState::default()
         };
-        view.render_to(&mut display, &state_min);
+        BrightnessView::render(&mut display, &state_min);
         let pixels_min = display.count_pixels_in_region(14, 38, 100, 10);
 
         // Render at max brightness
@@ -199,7 +187,7 @@ mod tests {
             brightness_level: BRIGHTNESS_MAX,
             ..AppState::default()
         };
-        view.render_to(&mut display, &state_max);
+        BrightnessView::render(&mut display, &state_max);
         let pixels_max = display.count_pixels_in_region(14, 38, 100, 10);
 
         // Max should have more pixels in the bar region
@@ -213,17 +201,15 @@ mod tests {
     #[test]
     fn rainbow_test_shows_title() {
         let mut display = MockDisplay::new();
-        let mut view = RainbowTestView::new();
         let state = AppState::default();
 
-        view.render_to(&mut display, &state);
+        RainbowTestView::render(&mut display, &state);
         assert!(display.contains("Rainbow Test"));
     }
 
     #[test]
     fn rainbow_test_shows_running_state() {
         let mut display = MockDisplay::new();
-        let mut view = RainbowTestView::new();
 
         let state = AppState {
             rainbow_test: RainbowTestState {
@@ -232,14 +218,13 @@ mod tests {
             },
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        RainbowTestView::render(&mut display, &state);
         assert!(display.contains("RUNNING"));
     }
 
     #[test]
     fn rainbow_test_shows_stopped_state() {
         let mut display = MockDisplay::new();
-        let mut view = RainbowTestView::new();
 
         let state = AppState {
             rainbow_test: RainbowTestState {
@@ -248,7 +233,7 @@ mod tests {
             },
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        RainbowTestView::render(&mut display, &state);
         assert!(display.contains("STOPPED"));
     }
 
@@ -259,17 +244,15 @@ mod tests {
     #[test]
     fn string_length_shows_title() {
         let mut display = MockDisplay::new();
-        let mut view = StringLengthView::new();
         let state = AppState::default();
 
-        view.render_to(&mut display, &state);
+        StringLengthView::render(&mut display, &state);
         assert!(display.contains("String Length"));
     }
 
     #[test]
     fn string_length_shows_current_string() {
         let mut display = MockDisplay::new();
-        let mut view = StringLengthView::new();
 
         let state = AppState {
             string_length: StringLengthState {
@@ -279,7 +262,7 @@ mod tests {
             },
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        StringLengthView::render(&mut display, &state);
         assert!(display.contains("String: 5"));
         assert!(display.contains("Pixel: 100"));
     }
@@ -291,17 +274,15 @@ mod tests {
     #[test]
     fn sd_card_shows_title() {
         let mut display = MockDisplay::new();
-        let mut view = SdCardView::new();
         let state = AppState::default();
 
-        view.render_to(&mut display, &state);
+        SdCardView::render(&mut display, &state);
         assert!(display.contains("SD Card"));
     }
 
     #[test]
     fn sd_card_shows_unmounted() {
         let mut display = MockDisplay::new();
-        let mut view = SdCardView::new();
 
         let state = AppState {
             sd_card: SdCardState {
@@ -310,14 +291,13 @@ mod tests {
             },
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        SdCardView::render(&mut display, &state);
         assert!(display.contains("Scanning"));
     }
 
     #[test]
     fn sd_card_shows_no_files() {
         let mut display = MockDisplay::new();
-        let mut view = SdCardView::new();
 
         let state = AppState {
             sd_card: SdCardState {
@@ -327,14 +307,13 @@ mod tests {
             },
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        SdCardView::render(&mut display, &state);
         assert!(display.contains("No .fseq files"));
     }
 
     #[test]
     fn sd_card_shows_file_list() {
         let mut display = MockDisplay::new();
-        let mut view = SdCardView::new();
 
         // In test mode, filenames come from get_filename() which returns "file0.fseq", "file1.fseq", etc.
         let state = AppState {
@@ -346,7 +325,7 @@ mod tests {
             },
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        SdCardView::render(&mut display, &state);
         // Shows scrollable list with placeholder filenames and Exit option
         assert!(display.contains("> file0.fseq")); // First file selected
         assert!(display.contains("file1.fseq")); // Second file visible
@@ -356,7 +335,6 @@ mod tests {
     #[test]
     fn sd_card_shows_playing() {
         let mut display = MockDisplay::new();
-        let mut view = SdCardView::new();
 
         // In test mode, filenames come from get_filename() which returns "file3.fseq"
         let state = AppState {
@@ -370,7 +348,7 @@ mod tests {
             },
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        SdCardView::render(&mut display, &state);
         assert!(display.contains("PLAYING"));
         assert!(display.contains("file3.fseq"));
     }
@@ -378,7 +356,6 @@ mod tests {
     #[test]
     fn sd_card_shows_auto_loop() {
         let mut display = MockDisplay::new();
-        let mut view = SdCardView::new();
 
         let state = AppState {
             sd_card: SdCardState {
@@ -391,7 +368,7 @@ mod tests {
             },
             ..AppState::default()
         };
-        view.render_to(&mut display, &state);
+        SdCardView::render(&mut display, &state);
         assert!(display.contains("PLAYING"));
         assert!(display.contains("[AUTO]"));
     }
@@ -403,10 +380,9 @@ mod tests {
     #[test]
     fn shutdown_shows_confirmation() {
         let mut display = MockDisplay::new();
-        let mut view = ShutdownView::new();
         let state = AppState::default();
 
-        view.render_to(&mut display, &state);
+        ShutdownView::render(&mut display, &state);
         assert!(display.contains("Shutdown"));
         assert!(display.contains("Power off?"));
         assert!(display.contains("Sel: confirm"));

@@ -173,3 +173,53 @@ The AWG project at `../awg` is the reference implementation of the reactive arch
 - `../awg/include/Action.h` - Action definitions
 - `../awg/src/StateReducer.cpp` - Pure reducer
 - `../awg/src/SideEffects.cpp` - Hardware I/O
+
+---
+
+## Rust/Embassy Port
+
+A Rust port using Embassy async framework is in the `rust/` directory. See `rust/README.md` for full details.
+
+### Quick Start
+
+```bash
+cd rust
+./flash.sh
+```
+
+### Critical RP2350 Embassy Setup
+
+1. **Use git version of embassy-rp** - crates.io 0.4 has RP2350 timer init bugs:
+   ```toml
+   embassy-rp = { git = "https://github.com/embassy-rs/embassy", features = ["rp235xb", "critical-section-impl", "time-driver", "defmt"] }
+   ```
+
+2. **memory.x must have RP2350 sections** - The boot ROM requires `.start_block`, `.bi_entries`, and `.end_block` sections. See `rust/memory.x`.
+
+3. **build.rs must specify linker scripts**:
+   ```rust
+   println!("cargo:rustc-link-arg=-Tlink.x");
+   println!("cargo:rustc-link-arg=-Tdefmt.x");
+   ```
+
+4. **UF2 conversion needs --abs-block** for RP2350-E10 errata:
+   ```bash
+   picotool uf2 convert firmware -t elf out.uf2 --family rp2350-arm-s --abs-block
+   ```
+
+### Rust Code Conventions
+
+- Use `snake_case` for functions and variables
+- State management via `reducto` crate (Redux-like pattern)
+- Async/await with Embassy executor
+- `defmt` for logging (requires debug probe for RTT output)
+
+### I2C Pin Mapping
+
+- **GPIO 46**: I2C1 SDA
+- **GPIO 47**: I2C1 SCL
+- **Frequency**: 400kHz
+
+```rust
+let i2c = I2c::new_async(p.I2C1, scl, sda, Irqs, config);
+```

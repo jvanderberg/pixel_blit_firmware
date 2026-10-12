@@ -342,7 +342,7 @@ source = "git+https://github.com/embassy-rs/embassy#905bdfa7662c2ac5d2dfc81219c9
 dependencies = [
  "embassy-futures",
  "embassy-hal-internal",
- "embassy-sync",
+ "embassy-sync 0.7.2",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -409,7 +409,7 @@ source = "git+https://github.com/embassy-rs/embassy#905bdfa7662c2ac5d2dfc81219c9
 dependencies = [
  "embassy-futures",
  "embassy-net-driver",
- "embassy-sync",
+ "embassy-sync 0.7.2",
 ]
 
 [[package]]
@@ -426,7 +426,7 @@ dependencies = [
  "embassy-embedded-hal",
  "embassy-futures",
  "embassy-hal-internal",
- "embassy-sync",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "embassy-time-driver",
  "embassy-time-queue-utils",
@@ -448,6 +448,20 @@ dependencies = [
  "rp2040-boot2",
  "sha2-const-stable",
  "smart-leds",
+]
+
+[[package]]
+name = "embassy-sync"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d2c8cdff05a7a51ba0087489ea44b0b1d97a296ca6b1d6d1a33ea7423d34049"
+dependencies = [
+ "cfg-if",
+ "critical-section",
+ "embedded-io-async 0.6.1",
+ "futures-sink",
+ "futures-util",
+ "heapless",
 ]
 
 [[package]]
@@ -503,7 +517,7 @@ source = "git+https://github.com/embassy-rs/embassy#905bdfa7662c2ac5d2dfc81219c9
 dependencies = [
  "embassy-futures",
  "embassy-net-driver-channel",
- "embassy-sync",
+ "embassy-sync 0.7.2",
  "embassy-usb-driver",
  "embedded-io-async 0.7.0",
  "heapless",
@@ -752,6 +766,24 @@ name = "futures-sink"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e575fab7d1e0dcb8d0c7bcf9a63ee213816ab51902e6d244a95819acacf1d4f7"
+
+[[package]]
+name = "futures-task"
+version = "0.3.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f90f7dce0722e95104fcb095585910c0977252f286e354b5e3bd38902cd99988"
+
+[[package]]
+name = "futures-util"
+version = "0.3.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9fa08315bb612088cc391249efdc3bc77536f16c91f6cf495e6fbe85b20a4a81"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "pin-project-lite",
+ "pin-utils",
+]
 
 [[package]]
 name = "generator"
@@ -1093,6 +1125,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
 
 [[package]]
+name = "pin-utils"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
 name = "pio"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1151,7 +1189,7 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "embassy-rp",
- "embassy-sync",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "embassy-usb",
  "embedded-graphics",
@@ -1164,6 +1202,7 @@ dependencies = [
  "heapless",
  "panic-probe",
  "reducto",
+ "reducto-view",
  "sh1106",
  "static_cell",
 ]
@@ -1269,7 +1308,25 @@ dependencies = [
 name = "reducto"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
+ "embassy-sync 0.6.2",
  "heapless",
+]
+
+[[package]]
+name = "reducto-view"
+version = "0.1.0"
+dependencies = [
+ "reducto-view-macros",
+]
+
+[[package]]
+name = "reducto-view-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
 ]
 
 [[package]]

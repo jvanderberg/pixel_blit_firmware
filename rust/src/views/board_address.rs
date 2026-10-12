@@ -9,11 +9,7 @@ use crate::state::AppState;
 pub struct BoardAddressView;
 
 impl BoardAddressView {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn render_to<D: Display>(&mut self, display: &mut D, state: &AppState) {
+    pub fn render<D: Display>(display: &mut D, state: &AppState) {
         display.text("Board Address", 22, 10);
 
         let mut line: String<32> = String::new();

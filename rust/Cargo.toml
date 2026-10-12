@@ -44,7 +44,9 @@ view-test = [
 
 [dependencies]
 # Reducto state management (always needed)
-reducto = { path = "../../reducto" }
+# embassy feature provides ActionChannel for async dispatch
+reducto = { path = "../../reducto", features = ["embassy"] }
+reducto-view = { path = "../../reducto/reducto-view" }
 
 # Heapless collections (always needed for no_std)
 heapless = "0.8"

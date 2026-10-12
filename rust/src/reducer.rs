@@ -6,138 +6,142 @@
 use crate::action::Action;
 use crate::effect::AppEffect;
 use crate::state::*;
-use reducto::Effect;
+use reducto::{Effect, Reducer};
 
-reducto::reducer! {
-    pub AppReducer for AppState, Action, AppEffect {
-        Action::Boot => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            // Just trigger initial render
-        },
+pub struct AppReducer;
 
-        Action::PowerToggle => |state| {
-            if !state.is_powered_on {
-                state.is_powered_on = true
-            } else {
-                // Power off: stop all tests, return to main menu
-                state.is_powered_on = false;
-                state.in_detail_view = false;
-                state.rainbow_test.run_state = RunState::Stopped;
-                state.string_length.run_state = RunState::Stopped
+impl Reducer for AppReducer {
+    type State = AppState;
+    type Action = Action;
+    type Effect = AppEffect;
+
+    fn reduce(state: &mut Self::State, action: Self::Action) -> Self::Effect {
+        match action {
+            Action::Boot => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                // Just trigger initial render
+                AppEffect::changed()
             }
-        },
 
-        Action::ButtonNext => |state| {
-            if !state.is_powered_on {
-                state.is_powered_on = true
-            } else if state.boot_state == BootState::Error {
-                state.boot_state = BootState::Ready
-            } else {
-                return reduce_button_next(state);
+            Action::PowerToggle => {
+                if !state.is_powered_on {
+                    state.is_powered_on = true;
+                } else {
+                    // Power off: stop all tests, return to main menu
+                    state.is_powered_on = false;
+                    state.in_detail_view = false;
+                    state.rainbow_test.run_state = RunState::Stopped;
+                    state.string_length.run_state = RunState::Stopped;
+                }
+                AppEffect::changed()
             }
-        },
 
-        Action::ButtonSelect => |state| {
-            if !state.is_powered_on {
-                state.is_powered_on = true
-            } else if state.boot_state == BootState::Error {
-                state.boot_state = BootState::Ready
-            } else {
-                return reduce_button_select(state);
+            Action::ButtonNext => {
+                if !state.is_powered_on {
+                    state.is_powered_on = true;
+                    AppEffect::changed()
+                } else if state.boot_state == BootState::Error {
+                    state.boot_state = BootState::Ready;
+                    AppEffect::changed()
+                } else {
+                    reduce_button_next(state)
+                }
             }
-        },
 
-        Action::Tick1s => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            state.uptime_seconds = state.uptime_seconds.wrapping_add(1)
-        },
-
-        Action::BrightnessUp => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            if state.brightness_level >= BRIGHTNESS_MAX {
-                AppEffect::Unchanged
-            } else {
-                state.brightness_level += 1;
-                AppEffect::Save
+            Action::ButtonSelect => {
+                if !state.is_powered_on {
+                    state.is_powered_on = true;
+                    AppEffect::changed()
+                } else if state.boot_state == BootState::Error {
+                    state.boot_state = BootState::Ready;
+                    AppEffect::changed()
+                } else {
+                    reduce_button_select(state)
+                }
             }
-        },
 
-        Action::BrightnessDown => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            if state.brightness_level <= BRIGHTNESS_MIN {
-                AppEffect::Unchanged
-            } else {
-                state.brightness_level -= 1;
-                AppEffect::Save
+            Action::Tick1s => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                state.uptime_seconds = state.uptime_seconds.wrapping_add(1);
+                AppEffect::changed()
             }
-        },
 
-        Action::RainbowFrameComplete { fps } => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            state.rainbow_test.fps = fps
-        },
+            Action::BrightnessUp => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                if state.brightness_level >= BRIGHTNESS_MAX {
+                    AppEffect::Unchanged
+                } else {
+                    state.brightness_level += 1;
+                    AppEffect::Save
+                }
+            }
 
-        Action::SdRescan => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            state.sd_card.error_message = None;
-            AppEffect::SdRescan
-        },
+            Action::BrightnessDown => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                if state.brightness_level <= BRIGHTNESS_MIN {
+                    AppEffect::Unchanged
+                } else {
+                    state.brightness_level -= 1;
+                    AppEffect::Save
+                }
+            }
 
-        Action::SdFilesScanned { count } => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            state.sd_card.mounted = true;
-            state.sd_card.file_count = count;
-            state.sd_card.error_message = None;
-            state.boot_state = BootState::Ready
-        },
+            Action::RainbowFrameComplete { fps } => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                state.rainbow_test.fps = fps;
+                AppEffect::changed()
+            }
 
-        Action::SdConfigLoaded { strings, string_count: _, max_pixel_count: _ } => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            state.strings = strings;
-            state.boot_state = BootState::Ready
-        },
+            Action::SdRescan => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                state.sd_card.error_message = None;
+                AppEffect::SdRescan
+            }
 
-        Action::SdCardError { message } => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            state.sd_card.mounted = false;
-            state.sd_card.file_count = 0;
-            state.sd_card.error_message = None;
-            state.boot_state = BootState::Error;
-            state.boot_error = Some(message)
-        },
+            Action::SdFilesScanned { count } => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                state.sd_card.mounted = true;
+                state.sd_card.file_count = count;
+                state.sd_card.error_message = None;
+                state.boot_state = BootState::Ready;
+                AppEffect::changed()
+            }
 
-        Action::SdConfigError { message } => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            state.boot_state = BootState::Error;
-            state.boot_error = Some(message)
-        },
+            Action::SdConfigLoaded { strings, string_count: _, max_pixel_count: _ } => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                state.strings = strings;
+                state.boot_state = BootState::Ready;
+                AppEffect::changed()
+            }
 
-        Action::AutoToggle => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            state.sd_card.auto_loop = !state.sd_card.auto_loop
-        },
+            Action::SdCardError { message } => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                state.sd_card.mounted = false;
+                state.sd_card.file_count = 0;
+                state.sd_card.error_message = None;
+                state.boot_state = BootState::Error;
+                state.boot_error = Some(message);
+                AppEffect::changed()
+            }
 
-        Action::FseqNext => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            if !state.sd_card.is_playing { return AppEffect::Unchanged; }
+            Action::SdConfigError { message } => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                state.boot_state = BootState::Error;
+                state.boot_error = Some(message);
+                AppEffect::changed()
+            }
 
-            // Advance to next file (wrap around)
-            let next_index = if state.sd_card.playing_index + 1 >= state.sd_card.file_count {
-                0
-            } else {
-                state.sd_card.playing_index + 1
-            };
-            state.sd_card.playing_index = next_index;
-            state.sd_card.scroll_index = next_index;
-            AppEffect::FseqStart
-        },
+            Action::AutoToggle => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                state.sd_card.auto_loop = !state.sd_card.auto_loop;
+                AppEffect::changed()
+            }
 
-        Action::FseqLoopComplete => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            if !state.sd_card.is_playing { return AppEffect::Unchanged; }
+            Action::FseqNext => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                if !state.sd_card.is_playing { return AppEffect::Unchanged; }
 
-            if state.sd_card.auto_loop {
-                // Auto-advance to next file
+                // Advance to next file (wrap around)
                 let next_index = if state.sd_card.playing_index + 1 >= state.sd_card.file_count {
                     0
                 } else {
@@ -146,16 +150,34 @@ reducto::reducer! {
                 state.sd_card.playing_index = next_index;
                 state.sd_card.scroll_index = next_index;
                 AppEffect::FseqStart
-            } else {
-                // Just loop current file (no state change, but re-trigger)
-                AppEffect::Unchanged
             }
-        },
 
-        Action::FseqFpsUpdate { fps } => |state| {
-            if !state.is_powered_on { return AppEffect::Unchanged; }
-            state.sd_card.fps = fps
-        },
+            Action::FseqLoopComplete => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                if !state.sd_card.is_playing { return AppEffect::Unchanged; }
+
+                if state.sd_card.auto_loop {
+                    // Auto-advance to next file
+                    let next_index = if state.sd_card.playing_index + 1 >= state.sd_card.file_count {
+                        0
+                    } else {
+                        state.sd_card.playing_index + 1
+                    };
+                    state.sd_card.playing_index = next_index;
+                    state.sd_card.scroll_index = next_index;
+                    AppEffect::FseqStart
+                } else {
+                    // Just loop current file (no state change, but re-trigger)
+                    AppEffect::Unchanged
+                }
+            }
+
+            Action::FseqFpsUpdate { fps } => {
+                if !state.is_powered_on { return AppEffect::Unchanged; }
+                state.sd_card.fps = fps;
+                AppEffect::changed()
+            }
+        }
     }
 }
 

@@ -25,11 +25,7 @@ fn get_filename(index: usize) -> String<32> {
 pub struct SdCardView;
 
 impl SdCardView {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn render_to<D: Display>(&mut self, display: &mut D, state: &AppState) {
+    pub fn render<D: Display>(display: &mut D, state: &AppState) {
         display.text("SD Card", 40, 10);
 
         // Show error message if present

@@ -9,11 +9,7 @@ use crate::state::{AppState, MenuEntry};
 pub struct MainMenuView;
 
 impl MainMenuView {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn render_to<D: Display>(&mut self, display: &mut D, state: &AppState) {
+    pub fn render<D: Display>(display: &mut D, state: &AppState) {
         // Title with uptime on the right
         display.text("Pixel Blit", 4, 10);
 

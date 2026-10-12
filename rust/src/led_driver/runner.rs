@@ -35,6 +35,7 @@ use embassy_time::{Duration, Instant, Timer};
 use super::buffer::{
     FrameData, FrameStringConfig, WriteToken,
     FRAME_CHANNEL, FREE_CHANNEL,
+    FSEQ_REQUEST_CHANNEL, FSEQ_TOKEN_CHANNEL, FSEQ_RETURN_CHANNEL,
 };
 
 /// Current frame generator (protected by mutex for atomic swap)
@@ -140,6 +141,24 @@ pub async fn run(initial_token: WriteToken) -> ! {
     let mut fps_last_time: Option<Instant> = None;
 
     loop {
+        // Check if FSEQ task wants to take over
+        if FSEQ_REQUEST_CHANNEL.try_receive().is_ok() {
+            defmt::info!("Runner: FSEQ takeover requested");
+
+            // Hand off our token
+            FSEQ_TOKEN_CHANNEL.send(token).await;
+
+            // Wait for token to be returned
+            token = FSEQ_RETURN_CHANNEL.receive().await;
+            defmt::info!("Runner: FSEQ returned token, resuming");
+
+            // Reset timing state
+            last_frame_time = None;
+            fps_last_time = None;
+            was_active = false;
+            continue;
+        }
+
         if let Some(gen) = current_generator() {
             if !was_active {
                 defmt::info!("Runner: generator detected, starting");
