@@ -42,6 +42,20 @@ static bool check_stop_requested(void) {
     return false;
 }
 
+// The pixels and the board's regulator share one 12V supply. The board boots
+// while that rail is still rising, and pixels that see data before their own
+// supply has settled can lock up (dark or half-lit strings until replugged),
+// so hold the data lines idle until this long after boot.
+#define PIXEL_POWER_SETTLE_MS 2000
+
+static void wait_for_pixel_power(void) {
+    absolute_time_t ready = from_us_since_boot((uint64_t)PIXEL_POWER_SETTLE_MS * 1000);
+    if (absolute_time_diff_us(get_absolute_time(), ready) > 0) {
+        printf("Core1: Waiting for pixel power to settle\n");
+        sleep_until(ready);
+    }
+}
+
 // --- Internal: FSEQ playback task ---
 static bool run_fseq_task(void) {
     fseq_player_t* ctx = g_fseq_ctx;
@@ -141,6 +155,7 @@ void core1_main(void) {
                 break;
 
             case CORE1_CMD_PLAY_FSEQ:
+                wait_for_pixel_power();
                 current_task = CORE1_TASK_FSEQ;
                 fseq_loop_count = 0;
                 run_fseq_task();
@@ -149,6 +164,7 @@ void core1_main(void) {
                 break;
 
             case CORE1_CMD_PLAY_RAINBOW:
+                wait_for_pixel_power();
                 current_task = CORE1_TASK_RAINBOW;
                 run_rainbow_task();
                 previous_task = CORE1_TASK_RAINBOW;
