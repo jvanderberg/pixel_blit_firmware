@@ -258,10 +258,15 @@ void fseq_player_run_loop(fseq_player_t *ctx, fseq_stop_check_fn stop_check) {
             continue;
         }
 
+        // The frame data rarely ends on a chunk boundary, so the last read of
+        // a loop is usually short: push it, the frame-count check above ends
+        // the loop once the last frame completes.
         fr = f_read(&g_fseq_file, buffer, frame_size, &bytes_read);
-        if (fr != FR_OK || bytes_read < frame_size) {
-            // Unexpected EOF or error - loop back
+        if (fr != FR_OK || bytes_read == 0) {
+            // Error, or a file shorter than its header - loop back, and count
+            // it as a completed loop so auto-advance doesn't stall here
             printf("FSEQ: Read error or EOF, looping (fr=%d, bytes=%u)\n", fr, bytes_read);
+            core1_notify_fseq_loop();
             f_lseek(&g_fseq_file, g_header.channel_data_offset);
             fseq_parser_reset(g_parser);
             frames_played = 0;

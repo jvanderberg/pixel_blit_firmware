@@ -317,9 +317,8 @@ async fn play_fseq(
     let mut token = FSEQ_TOKEN_CHANNEL.receive().await;
     info!("FSEQ: got buffer, starting playback @ {} fps", fps);
 
-    // Timing (FPS limiting disabled for testing)
-    // let frame_interval = Duration::from_micros(1_000_000 / fps as u64);
-    // let last_frame_time = Instant::now();
+    // Frame pacing: each frame goes out one step time after the previous one
+    let frame_interval = Duration::from_micros(1_000_000 / fps as u64);
 
     // FPS measurement - accumulate 100 frames
     let mut total_loop_time: u64 = 0;
@@ -397,6 +396,7 @@ async fn play_fseq(
     // Send first frame - DMA starts
     let read_token = token.into_read_token();
     FRAME_CHANNEL.send(read_token).await;
+    let mut last_frame_time = Instant::now();
 
     'playback: loop {
         let loop_start = Instant::now();
@@ -475,6 +475,14 @@ async fn play_fseq(
         parse_time = parse_start.elapsed();
 
         frames_played += 1;
+
+        // FPS limiting - wait until frame time
+        let target_time = last_frame_time + frame_interval;
+        let now = Instant::now();
+        if now < target_time {
+            Timer::after(target_time - now).await;
+        }
+        last_frame_time = target_time; // Drift correction
 
         // SEND frame to output - starts DMA for this frame
         let send_start = Instant::now();
